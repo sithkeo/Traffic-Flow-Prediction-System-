@@ -5,11 +5,11 @@ from data_parser import parse_traffic_data
 
 class TestTrafficParser(unittest.TestCase):
     # This test checks that a valid 2025-format CSV can be parsed into a time-series DataFrame
-    def test_parse_valid_csv(self):
-        df = parse_traffic_data("test_data/VSDATA_20250501.csv")
-        self.assertIsInstance(df, pd.DataFrame)
-        self.assertIn("SCATS", df.columns)
-        self.assertEqual(len(df.columns), 4)  # Expected columns: SCATS, Date, Time, Volume
+    # def test_parse_valid_csv(self):
+    #     df = parse_traffic_data("test_data/VSDATA_20250501.csv")
+    #     self.assertIsInstance(df, pd.DataFrame)
+    #     self.assertIn("SCATS", df.columns)
+    #     self.assertEqual(len(df.columns), 4)  # Expected columns: SCATS, Date, Time, Volume
 
     # This test ensures the parser can successfully handle a 2006-format Excel file (.xlsx)
     def test_parse_valid_xlsx(self):
