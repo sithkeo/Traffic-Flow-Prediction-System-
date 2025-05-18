@@ -104,42 +104,45 @@ def _parse_2025_csv(filepath):
 def add_coordinates(df, listing_path, gps_path):
     """
     Adds latitude and longitude columns to a parsed DataFrame using SCATS location info and GPS data.
+    Optimised for performance using dictionary-based keyword lookup.
     """
-        # Load SCATS listing metadata and GPS reference dataset
-        # Dynamically determine whether to skip rows by checking if expected header is present
+      # Load SCATS listing metadata and GPS reference dataset
+      # Dynamically determine whether to skip rows by checking if expected header is present
     with open(listing_path, 'r', encoding='utf-8') as f:
         header_line = f.readline()
 
     if "Site Number" in header_line and "Location Description" in header_line:
         listing = pd.read_csv(listing_path)
     else:
-        listing = pd.read_csv(listing_path, skiprows=9) #hardcoded skiprows for the SCATs site listing sheet
+        listing = pd.read_csv(listing_path, skiprows=9)
     gps = pd.read_csv(gps_path)
 
-        # Rename columns for clarity and ensure SCATS column is numeric
+      # Prepare and clean SCATS listing
     listing = listing.rename(columns={"Site Number": "SCATS", "Location Description": "Location"})
     listing["SCATS"] = pd.to_numeric(listing["SCATS"], errors="coerce")
-
-        # Merge the SCATS listing into the main DataFrame to get textual location descriptions
     df = df.merge(listing[["SCATS", "Location"]], on="SCATS", how="left")
 
-        # Prepare uppercase versions of location descriptions for simple text matching
+      # Prepare uppercase strings for keyword matching
     df["Location_UPPER"] = df["Location"].astype(str).str.upper()
     gps["SITE_DESC_UPPER"] = gps["SITE_DESC"].astype(str).str.upper()
 
-        # Define a matching function that attempts to find the first word from the SCATS location in the GPS list
-    def match_gps(location):
+      # Build lookup dictionary using first keyword from GPS site descriptions
+    gps_lookup = {}
+    for _, row in gps.iterrows():
+        keyword = row["SITE_DESC_UPPER"].split()[0]
+        if keyword not in gps_lookup:
+            gps_lookup[keyword] = (row["X"], row["Y"])
+
+      # Vectorised coordinate assignment using keyword map
+    def resolve_coords(location):
         if not isinstance(location, str) or len(location.strip()) == 0:
             return pd.Series([None, None])
-        keyword = location.split()[0]  # Use the first word of the location as a basic search key
-        match = gps[gps["SITE_DESC_UPPER"].str.contains(keyword, na=False)]
-        return match[["X", "Y"]].iloc[0] if not match.empty else pd.Series([None, None])
+        keyword = location.split()[0]
+        return gps_lookup.get(keyword, (None, None))
 
-        # Apply the matching function to get coordinates for each row
-    coords = df["Location_UPPER"].apply(lambda loc: match_gps(loc))
-
-        # Assign the matched coordinates to new Longitude and Latitude columns
-    df[["Longitude", "Latitude"]] = coords
+      # Assign the matched coordinates to new Longitude and Latitude columns
+    coords = df["Location_UPPER"].map(lambda loc: resolve_coords(loc))
+    df[["Longitude", "Latitude"]] = pd.DataFrame(coords.tolist(), index=df.index)
     return df
     
 
