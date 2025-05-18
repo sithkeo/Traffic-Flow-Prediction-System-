@@ -51,7 +51,7 @@ def parse_traffic_data(filepath, drop_zeros=False, listing_path=None, gps_path=N
     if drop_zeros:
         df = df[df["Volume"] != 0]
 
-        # Skip enrichment if coordinates are already present (e.g., in validated 2006 Boroondara file)
+    # Skip enrichment if coordinates are already present (e.g., in validated 2006 Boroondara file)
     if listing_path and gps_path and not ("Longitude" in df.columns and "Latitude" in df.columns):
         df = add_coordinates(df, listing_path, gps_path)
 
@@ -64,7 +64,7 @@ def _parse_2006_excel(filepath, max_rows=None):
     Parses the 2006-format Excel file with volume data recorded per SCATS site per day.
     """
     xls = pd.ExcelFile(filepath)
-        # Custom handling for Boroondara-validated file: use sheet index 1
+    # Custom handling for Boroondara-validated file: use sheet index 1
     if "Scats Data October 2006" in os.path.basename(filepath):
         df_raw = pd.read_excel(filepath, sheet_name=1, skiprows=1, nrows=max_rows)
     else:
@@ -73,14 +73,14 @@ def _parse_2006_excel(filepath, max_rows=None):
     metadata_cols = df_raw.columns[:10]  # SCATS site metadata
     time_cols = df_raw.columns[10:]      # V00 to V95 (15-min intervals)
 
-        # Remove rows missing site ID or date information
+    # Remove rows missing site ID or date information
     df_clean = df_raw.dropna(subset=[metadata_cols[0], metadata_cols[9]])
-        # Ensure site ID is treated as string
+    # Ensure site ID is treated as string
     df_clean[metadata_cols[0]] = df_clean[metadata_cols[0]].astype(str)
-        # Convert the date column to datetime object
+    # Convert the date column to datetime object
     df_clean[metadata_cols[9]] = pd.to_datetime(df_clean[metadata_cols[9]], errors='coerce')
 
-        # Expand each row into 96 rows (1 per time interval)
+    # Expand each row into 96 rows (1 per time interval)
     all_rows = []
     for _, row in df_clean.iterrows():
         site_id = row[metadata_cols[0]]
@@ -100,16 +100,16 @@ def _parse_2025_csv(filepath, max_rows=None):
     Parses the newer 2025-format CSV file with per-detector traffic data.
     """
     df = pd.read_csv(filepath, nrows=max_rows)
-        # Expected 96 volume columns for each 15-minute interval of a day
+    # Expected 96 volume columns for each 15-minute interval of a day
     required_cols = ["NB_SCATS_SITE", "QT_INTERVAL_COUNT"] + [f"V{i:02d}" for i in range(96)]
     for col in required_cols:
         if col not in df.columns:
             raise ValueError(f"Missing required column: {col}")
 
-        # Convert date column to datetime to support time expansion
+    # Convert date column to datetime to support time expansion
     df["QT_INTERVAL_COUNT"] = pd.to_datetime(df["QT_INTERVAL_COUNT"], errors="coerce")
     all_rows = []
-      # Expand each detector-day row into 96 rows of timestamped volume data
+    # Expand each detector-day row into 96 rows of timestamped volume data
     for _, row in df.iterrows():
         site_id = row["NB_SCATS_SITE"]
         date = row["QT_INTERVAL_COUNT"]
@@ -126,8 +126,8 @@ def add_coordinates(df, listing_path, gps_path):
     Adds latitude and longitude columns to a parsed DataFrame using SCATS location info and GPS data.
     Optimised for performance using dictionary-based keyword lookup.
     """
-      # Load SCATS listing metadata and GPS reference dataset
-      # Dynamically determine whether to skip rows by checking if expected header is present
+    # Load SCATS listing metadata and GPS reference dataset
+    # Dynamically determine whether to skip rows by checking if expected header is present
     with open(listing_path, 'r', encoding='utf-8') as f:
         header_line = f.readline()
 
@@ -137,32 +137,32 @@ def add_coordinates(df, listing_path, gps_path):
         listing = pd.read_csv(listing_path, skiprows=9)
     gps = pd.read_csv(gps_path)
 
-      # Prepare and clean SCATS listing
+    # Prepare and clean SCATS listing
     listing = listing.rename(columns={"Site Number": "SCATS", "Location Description": "Location"})
     listing["SCATS"] = pd.to_numeric(listing["SCATS"], errors="coerce")
     df["SCATS"] = df["SCATS"].astype(str)
     listing["SCATS"] = listing["SCATS"].astype(str)
     df = df.merge(listing[["SCATS", "Location"]], on="SCATS", how="left")
 
-      # Prepare uppercase strings for keyword matching
+    # Prepare uppercase strings for keyword matching
     df["Location_UPPER"] = df["Location"].astype(str).str.upper()
     gps["SITE_DESC_UPPER"] = gps["SITE_DESC"].astype(str).str.upper()
 
-      # Build lookup dictionary using first keyword from GPS site descriptions
+    # Build lookup dictionary using first keyword from GPS site descriptions
     gps_lookup = {}
     for _, row in gps.iterrows():
         keyword = row["SITE_DESC_UPPER"].split()[0]
         if keyword not in gps_lookup:
             gps_lookup[keyword] = (row["X"], row["Y"])
 
-      # Vectorised coordinate assignment using keyword map
+    # Vectorised coordinate assignment using keyword map
     def resolve_coords(location):
         if not isinstance(location, str) or len(location.strip()) == 0:
             return pd.Series([None, None])
         keyword = location.split()[0]
         return gps_lookup.get(keyword, (None, None))
 
-      # Assign the matched coordinates to new Longitude and Latitude columns
+    # Assign the matched coordinates to new Longitude and Latitude columns
     coords = df["Location_UPPER"].map(lambda loc: resolve_coords(loc))
     df[["Longitude", "Latitude"]] = pd.DataFrame(coords.tolist(), index=df.index)
     return df
@@ -210,11 +210,11 @@ if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("Usage: python data_parser.py <file|folder> [--drop-zeros] [--listing path] [--gps path] [--max-rows N]")
     else:
-            # First argument is expected to be a file or folder path
+        # First argument is expected to be a file or folder path
         path = sys.argv[1]
-            # Optional flag to exclude zero-volume rows
+        # Optional flag to exclude zero-volume rows
         drop = "--drop-zeros" in sys.argv
-            # Default metadata file paths for cross-referencing (used if --listing/--gps not provided)
+        # Default metadata file paths for cross-referencing (used if --listing/--gps not provided)
         default_listing = "database/SCATSSiteListingSpreadsheet_VicRoads.csv"
         listing_path = next((sys.argv[i + 1] for i, x in enumerate(sys.argv) if x == "--listing"), default_listing)
         default_gps = "database/Traffic_Count_Locations_with_LONG_LAT.csv"  # Default GPS dataset path
@@ -222,12 +222,21 @@ if __name__ == "__main__":
         max_rows = next((int(sys.argv[i + 1]) for i, x in enumerate(sys.argv) if x == "--max-rows"), None)
 
         try:
-                # If a folder is given, prompt the user to pick which files to process
+            # If a folder is given, prompt the user to pick which files to process
             if os.path.isdir(path):
                 step_through_directory(path, drop_zeros=drop, listing_path=listing_path, gps_path=gps_path)
-                # Otherwise parse a single file directly
+            # Otherwise parse a single file directly
             else:
                 df = parse_traffic_data(path, drop_zeros=drop, listing_path=listing_path, gps_path=gps_path, max_rows=max_rows)
             print(df.head())
+
+            # Save the parsed DataFrame to a CSV file
+            filename = os.path.splitext(os.path.basename(path))[0].replace(" ", "_")
+            # Ensure the output directory exists
+            os.makedirs("output", exist_ok=True)
+            output_path = f"output/{filename}_parsed.csv"
+            df.to_csv(output_path, index=False)
+            print(f"Saved to {output_path}")
+
         except ValueError as ve:
             print(f"Error: {ve}")
