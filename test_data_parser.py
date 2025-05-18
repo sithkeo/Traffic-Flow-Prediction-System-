@@ -4,14 +4,9 @@ Unit tests for SCATS traffic data parser.
 Ensures that valid and invalid files are handled as expected,
 and that optional behaviours (like drop_zeros) work correctly.
 """
-
 import unittest
-import warnings
 import pandas as pd
 from data_parser import parse_traffic_data, add_coordinates
-
-    # Suppress openpyxl header/footer warnings during Excel reads
-warnings.filterwarnings("ignore", category=UserWarning, module="openpyxl")
 
 class TestTrafficParser(unittest.TestCase):
 
