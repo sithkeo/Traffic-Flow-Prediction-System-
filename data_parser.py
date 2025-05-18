@@ -18,16 +18,12 @@ def parse_traffic_data(filepath, drop_zeros=False, listing_path=None, gps_path=N
     """
     Parses traffic data from file (.xlsx or .csv) and returns reshaped time-series DataFrame.
     Supports both the 2006 Excel format and 2025 CSV format. Optionally merges metadata.
-
-
-
     Parameters:
         filepath (str): Path to the file.
         drop_zeros (bool): If True, removes rows where traffic volume is 0.
         listing_path (str): Optional path to SCATS site listing CSV.
         gps_path (str): Optional path to traffic location lat/lon CSV.
         max_rows (int): If provided, limits how many raw input rows are processed (for preview/testing).
-
     Returns:
         pd.DataFrame: Time-series formatted traffic data.
     """
@@ -39,18 +35,28 @@ def parse_traffic_data(filepath, drop_zeros=False, listing_path=None, gps_path=N
     elif filepath.endswith(".xlsx"):
         df = _parse_2006_excel(filepath, max_rows=max_rows)
     elif filepath.endswith(".csv"):
-        df = _parse_2025_csv(filepath, max_rows=max_rows)
+        # Dynamically detect which format the CSV follows
+        with open(filepath, 'r', encoding='utf-8') as f:
+            header = f.readline()
+
+        if "NB_SCATS_SITE" in header and "QT_INTERVAL_COUNT" in header:
+            df = _parse_2025_csv(filepath, max_rows=max_rows)
+        elif "V00" in header and "V95" in header:
+            df = _parse_2006_excel(filepath, max_rows=max_rows)
+        else:
+            raise ValueError("Unrecognised CSV format. Cannot determine parser.")
     else:
         raise ValueError("Unsupported file format. Only .xlsx and .csv are supported.")
 
     if drop_zeros:
         df = df[df["Volume"] != 0]
 
-    if listing_path and gps_path:
+        # Skip enrichment if coordinates are already present (e.g., in validated 2006 Boroondara file)
+    if listing_path and gps_path and not ("Longitude" in df.columns and "Latitude" in df.columns):
         df = add_coordinates(df, listing_path, gps_path)
 
+        df.drop(columns=["Location_UPPER"], errors="ignore", inplace=True)
     return df
-
 
 
 def _parse_2006_excel(filepath, max_rows=None):
@@ -58,7 +64,11 @@ def _parse_2006_excel(filepath, max_rows=None):
     Parses the 2006-format Excel file with volume data recorded per SCATS site per day.
     """
     xls = pd.ExcelFile(filepath)
-    df_raw = pd.read_excel(xls, sheet_name="Data", skiprows=1, nrows=max_rows)
+        # Custom handling for Boroondara-validated file: use sheet index 1
+    if "Scats Data October 2006" in os.path.basename(filepath):
+        df_raw = pd.read_excel(filepath, sheet_name=1, skiprows=1, nrows=max_rows)
+    else:
+        df_raw = pd.read_excel(filepath, sheet_name="Data", skiprows=1, nrows=max_rows)
 
     metadata_cols = df_raw.columns[:10]  # SCATS site metadata
     time_cols = df_raw.columns[10:]      # V00 to V95 (15-min intervals)
@@ -74,13 +84,15 @@ def _parse_2006_excel(filepath, max_rows=None):
     all_rows = []
     for _, row in df_clean.iterrows():
         site_id = row[metadata_cols[0]]
+        location = row.get("Location", row.get(metadata_cols[1], None))
         date = row[metadata_cols[9]]
+        lat = row.get("NB_LATITUDE", None)
+        lon = row.get("NB_LONGITUDE", None)
         for i, col in enumerate(time_cols):
             time = (date + timedelta(minutes=15 * i))
-            all_rows.append([site_id, time.date(), time.time(), row[col]])
+            all_rows.append([site_id, location, time.date(), time.time(), row[col], lon, lat])
 
-    return pd.DataFrame(all_rows, columns=["SCATS", "Date", "Time", "Volume"])
-
+    return pd.DataFrame(all_rows, columns=["SCATS", "Location", "Date", "Time", "Volume", "Longitude", "Latitude"])
 
 
 def _parse_2025_csv(filepath, max_rows=None):
@@ -109,7 +121,6 @@ def _parse_2025_csv(filepath, max_rows=None):
     return pd.DataFrame(all_rows, columns=["SCATS", "Date", "Time", "Volume"])
 
 
-
 def add_coordinates(df, listing_path, gps_path):
     """
     Adds latitude and longitude columns to a parsed DataFrame using SCATS location info and GPS data.
@@ -129,6 +140,8 @@ def add_coordinates(df, listing_path, gps_path):
       # Prepare and clean SCATS listing
     listing = listing.rename(columns={"Site Number": "SCATS", "Location Description": "Location"})
     listing["SCATS"] = pd.to_numeric(listing["SCATS"], errors="coerce")
+    df["SCATS"] = df["SCATS"].astype(str)
+    listing["SCATS"] = listing["SCATS"].astype(str)
     df = df.merge(listing[["SCATS", "Location"]], on="SCATS", how="left")
 
       # Prepare uppercase strings for keyword matching
