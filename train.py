@@ -6,7 +6,7 @@ Used by main.py or external scripts.
 """
 
 import numpy as np
-from keras.callbacks import EarlyStopping
+from tensorflow.keras.callbacks import EarlyStopping  # Use TF-compatible callback
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 
 
@@ -25,34 +25,55 @@ def train_model(model_module, X_train, y_train, X_test, y_test, scaler,
 
     Returns:
         dict with predictions, actuals, MAE, RMSE, model object
+
+    Notes:
+        - The model is expected to be compiled within the build_model function.
+        - Outputs include both scaled and rescaled predictions.
+        - Metrics printed to console for model evaluation.
     """
     model_name = model_module.__name__.split('.')[-1].replace('_model', '').upper()
     print(f"\n--- Training {model_name} ---")
 
+    # Determine shape for LSTM or flattened input
     is_sequence = len(X_train.shape) == 3
     input_shape = X_train.shape[1:] if is_sequence else (X_train.shape[1],)
     X_train_model = X_train if is_sequence else X_train.reshape(X_train.shape[0], -1)
     X_test_model = X_test if is_sequence else X_test.reshape(X_test.shape[0], -1)
 
+    # Build and compile model
     model = model_module.build_model(input_shape)
     early_stop = EarlyStopping(monitor="val_loss", patience=5, restore_best_weights=True)
 
-    model.fit(X_train_model, y_train,
-              validation_split=0.1,
-              epochs=epochs,
-              batch_size=batch_size,
-              callbacks=[early_stop],
-              verbose=0)
+    # Train the model
+    history = model.fit(
+        X_train_model, y_train,
+        validation_split=0.1,
+        epochs=epochs,
+        batch_size=batch_size,
+        callbacks=[early_stop],
+        verbose=0
+    )
 
+    if history is None:
+        raise RuntimeError("[ERROR] model.fit() did not return a history object. Check Keras/TensorFlow versions.")
+    else:
+        print("[DEBUG] Training history captured successfully.")
+    
+    # Save the trained model
+    model.save(f"output/{model_name}_trained.keras")
+    print(f"[INFO] Model saved to output/{model_name}_trained.keras")
+
+    # Predict and rescale outputs
     preds = model.predict(X_test_model)
     preds_rescaled = scaler.inverse_transform(preds)
     y_test_rescaled = scaler.inverse_transform(y_test.reshape(-1, 1))
 
+    # Evaluate
     mae = mean_absolute_error(y_test_rescaled, preds_rescaled)
     rmse = mean_squared_error(y_test_rescaled, preds_rescaled) ** 0.5
-
     avg_volume = np.mean(y_test_rescaled)
     mae_percent = (mae / avg_volume) * 100
+
     print(f"{model_name} MAE: {mae:.2f} | RMSE: {rmse:.2f} | MAE%: {mae_percent:.2f}% of avg. volume ({avg_volume:.2f})")
 
     return {
@@ -60,5 +81,6 @@ def train_model(model_module, X_train, y_train, X_test, y_test, scaler,
         "predictions": preds_rescaled,
         "actuals": y_test_rescaled,
         "mae": mae,
-        "rmse": rmse
+        "rmse": rmse,
+        "history": history  # Include training history for per-epoch loss logging
     }
