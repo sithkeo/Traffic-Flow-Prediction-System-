@@ -4,18 +4,37 @@ Preview script for manually inspecting parsed traffic data with coordinates.
 This is not a unit test. Run this to load and display the first few rows of a dataset.
 """
 
+import os
 import pandas as pd
-from data_parser import parse_traffic_data, add_coordinates
+from data_parser import parse_traffic_data
 
-# Define file paths
-input_file = "database/VSDATA_20250501.csv"
+# Default metadata paths for coordinate matching (used if applicable)
 listing_path = "database/SCATSSiteListingSpreadsheet_VicRoads.csv"
 gps_path = "database/Traffic_Count_Locations_with_LONG_LAT.csv"
 
-# Parse and enrich the data
-df = parse_traffic_data(input_file, drop_zeros=False, max_rows=1)
-df = add_coordinates(df, listing_path, gps_path)
+def preview():
+    files = sorted([f for f in os.listdir("database") if f.endswith(".csv") or f.endswith(".xlsx")])
+    if not files:
+        print("No compatible files found in the database folder.")
+        return
 
-# Preview the first 10 rows
-print("Previewing first 10 rows of enriched traffic data:")
-print(df.head(10))
+    print("Select a file to preview:")
+    for idx, f in enumerate(files):
+        print(f"  [{idx}] {f}")
+
+    choice = input("Enter file index: ").strip()
+    if not choice.isdigit() or int(choice) >= len(files):
+        print("Invalid selection.")
+        return
+
+    filename = files[int(choice)]
+    full_path = os.path.join("database", filename)
+    try:
+        df = parse_traffic_data(full_path, drop_zeros=False, listing_path=listing_path, gps_path=gps_path, max_rows=10)
+        print(f"\nPreviewing: {filename}\n")
+        print(df.head(10))
+    except ValueError as ve:
+        print(f"Failed to parse {filename}: {ve}")
+
+if __name__ == "__main__":
+    preview()
