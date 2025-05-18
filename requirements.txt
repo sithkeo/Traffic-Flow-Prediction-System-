@@ -1,3 +1,2 @@
-```bash
+# This is a requirements file for a Python project.
 pip install tensorflow pandas numpy matplotlib scikit-learn matplotlib folium geopy keras typing-extensions
-```
