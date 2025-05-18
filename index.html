@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta author="Jacob" content="Stored-Template -- Repurposed" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Traffic Flow Prediction System – TFPS</title>
+    <style>
+      /* ===  Basic Reset  === */
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+      }
+
+      body {
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: flex-start;
+        background: url("https://images.unsplash.com/photo-1482192596544-9eb780fc7f66?auto=format&fit=crop&w=1350&q=80")
+          center / cover no-repeat;
+      }
+
+      header {
+        padding: 0.75rem 1rem;
+        width: 100%;
+        text-align: center;
+        background: rgba(0, 0, 0, 0.6);
+        color: #fff;
+        font-weight: 600;
+        letter-spacing: 0.05rem;
+      }
+
+      /* ===  Modal / Card  === */
+      .card {
+        margin: 3rem auto 1rem;
+        background: #ffffffee;
+        padding: 1.5rem 1.75rem;
+        border-radius: 6px;
+        max-width: 310px;
+        width: 90%;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+      }
+
+      .card h2 {
+        margin-bottom: 1rem;
+        font-size: 1.1rem;
+        text-align: center;
+      }
+
+      .form-group {
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+        margin-bottom: 0.9rem;
+        font-size: 0.9rem;
+      }
+
+      .form-group label {
+        font-weight: 600;
+      }
+
+      input[type="text"],
+      select {
+        padding: 0.4rem 0.55rem;
+        border: 1px solid #999;
+        border-radius: 4px;
+        font-size: 0.9rem;
+      }
+
+      button[type="submit"] {
+        margin-top: 0.5rem;
+        width: 100%;
+        background: #1976d2;
+        border: none;
+        color: #fff;
+        font-size: 0.95rem;
+        padding: 0.45rem 0;
+        border-radius: 4px;
+        cursor: pointer;
+        transition: background 0.3s ease;
+      }
+
+      button[type="submit"]:hover {
+        background: #125aa3;
+      }
+
+      /* ===  Output  === */
+      #output {
+        width: 90%;
+        max-width: 800px;
+        min-height: 160px;
+        background: #fff;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+        padding: 0.75rem 1rem;
+        overflow-y: auto;
+        white-space: pre-wrap;
+        line-height: 1.35;
+      }
+
+      /* === Progress Bar === */
+      .progress-wrap {
+        width: 150px;
+        height: 10px;
+        background: #eee;
+        border-radius: 5px;
+        overflow: hidden;
+        margin: 0.8rem auto 2rem;
+      }
+      .progress {
+        height: 100%;
+        width: 0;
+        background: #1976d2;
+        transition: width 0.2s ease;
+      }
+      .progress-text {
+        text-align: center;
+        font-size: 0.75rem;
+        margin-top: 0.25rem;
+        color: #fff;
+      }
+
+      @media (min-width: 768px) {
+        .card {
+          max-width: 340px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <!--  Title Bar  -->
+    <header>Traffic Flow Prediction System – TFPS</header>
+
+    <!--  Route Detection Form  -->
+    <section class="card">
+      <h2>Route Detection</h2>
+      <form id="routeForm">
+        <div class="form-group">
+          <label for="model">Select Model:</label>
+          <select id="model" required>
+            <option value="LSTM" selected>LSTM</option>
+            <option value="GRU">GRU</option>
+            <option value="SAES">SAES</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="origin">Origin Node:</label>
+          <input type="text" id="origin" placeholder="e.g. 970" required />
+        </div>
+
+        <div class="form-group">
+          <label for="destination">Destination Node:</label>
+          <input type="text" id="destination" placeholder="e.g. 3001" required />
+        </div>
+
+        <div class="form-group">
+          <label for="datetime">Date/Time:</label>
+          <input
+            type="text"
+            id="datetime"
+            placeholder="YYYY-MM-DD HH:MM"
+            required
+          />
+        </div>
+
+        <button type="submit">Run Prediction</button>
+      </form>
+    </section>
+
+    <!--  Output Panel -- barely functional -->
+    <section id="output"></section>
+
+    <!--  Progress Bar -- barely functional -->
+    <div class="progress-wrap">
+      <div class="progress" id="progressBar"></div>
+    </div>
+
+    <script>
+      const form = document.getElementById("routeForm");
+      const output = document.getElementById("output");
+      const progressBar = document.getElementById("progressBar");
+
+      /*
+        NOTE: Need to look into replacing mock with real data/progress bar soon.
+      */
+      function mockProgress() {
+        progressBar.style.width = "0%";
+        let width = 0;
+        const id = setInterval(() => {
+          if (width >= 100) {
+            clearInterval(id);
+          } else {
+            width += 5;
+            progressBar.style.width = width + "%";
+          }
+        }, 100);
+      }
+
+      form.addEventListener("submit", (e) => {
+        e.preventDefault();
+        mockProgress();
+
+        // Grab inputs
+        const model = document.getElementById("model").value;
+        const origin = document.getElementById("origin").value.trim();
+        const dest = document.getElementById("destination").value.trim();
+        const datetime = document.getElementById("datetime").value.trim();
+
+        // Placeholder content mimicking TBRGS output - Needs proper formating and grabbing data from the models
+        const result = `Routes from ${origin} to ${dest} using ${model} model on ${datetime}:\n\nRoute 1\n  Estimated time: 22.68 minutes\n  Total distance: 11.29 km\n  Avg traffic: 280.82 vehicles/5min\n  Path: ${origin} -> 3685 -> 2000 -> 3682 -> 3804 -> 4040 -> 4266 -> 4264 -> 4263 -> 3002 -> ${dest}`;
+
+        output.textContent = result;
+      });
+    </script>
+  </body>
+</html>
