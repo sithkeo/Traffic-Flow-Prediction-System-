@@ -4,7 +4,8 @@ Traffic Data Parser for SCATS Datasets
 - Handles both legacy `.xlsx` format (2006) and new `.csv` format (2025+)
 - Extracts 15-min interval volume data and reshapes it for time-series use
 - Option to drop zero-volume records to exclude non-traffic periods or potential noise
-- Warns user to manually convert `.xls` files (due to limited library support)
+- Allows interactive selection of files from the `database/` folder for parsing and preview
+- Adds coordinates from SCATS metadata and GPS dataset
 """
 
 import pandas as pd
@@ -20,6 +21,8 @@ def parse_traffic_data(filepath, drop_zeros=False):
     Parameters:
         filepath (str): Path to the file.
         drop_zeros (bool): If True, removes rows where traffic volume is 0.
+        listing_path (str): Optional path to SCATS site listing CSV.
+        gps_path (str): Optional path to traffic location lat/lon CSV.
 
     Returns:
         pd.DataFrame: Time-series formatted traffic data.
@@ -52,12 +55,14 @@ def _parse_2006_excel(filepath):
     metadata_cols = df_raw.columns[:10]  # SCATS site metadata
     time_cols = df_raw.columns[10:]      # V00 to V95 (15-min intervals)
 
-    # Filter out incomplete rows and convert types
+        # Remove rows missing site ID or date information
     df_clean = df_raw.dropna(subset=[metadata_cols[0], metadata_cols[9]])
+        # Ensure site ID is treated as string
     df_clean[metadata_cols[0]] = df_clean[metadata_cols[0]].astype(str)
+        # Convert the date column to datetime object
     df_clean[metadata_cols[9]] = pd.to_datetime(df_clean[metadata_cols[9]], errors='coerce')
 
-    # Expand each row into 96 rows (1 per time interval)
+        # Expand each row into 96 rows (1 per time interval)
     all_rows = []
     for _, row in df_clean.iterrows():
         site_id = row[metadata_cols[0]]
@@ -74,17 +79,17 @@ def _parse_2025_csv(filepath):
     Parses the newer 2025-format CSV file with per-detector traffic data.
     """
     df = pd.read_csv(filepath)
-
-    # Confirm required columns are present
+        # Expected 96 volume columns for each 15-minute interval of a day
     required_cols = ["NB_SCATS_SITE", "QT_INTERVAL_COUNT"] + [f"V{i:02d}" for i in range(96)]
     for col in required_cols:
         if col not in df.columns:
             raise ValueError(f"Missing required column: {col}")
-
+        
+        # Convert date column to datetime to support time expansion
     df["QT_INTERVAL_COUNT"] = pd.to_datetime(df["QT_INTERVAL_COUNT"], errors="coerce")
     all_rows = []
 
-    # Expand each detector-day row into 96 rows of timestamped volume data
+        # Expand each detector-day row into 96 rows of timestamped volume data
     for _, row in df.iterrows():
         site_id = row["NB_SCATS_SITE"]
         date = row["QT_INTERVAL_COUNT"]
@@ -96,16 +101,107 @@ def _parse_2025_csv(filepath):
     return pd.DataFrame(all_rows, columns=["SCATS", "Date", "Time", "Volume"])
 
 
-# Example usage (if running as script)
+def add_coordinates(df, listing_path, gps_path):
+    """
+    Adds latitude and longitude columns to a parsed DataFrame using SCATS location info and GPS data.
+    """
+        # Load SCATS listing metadata and GPS reference dataset
+        # Dynamically determine whether to skip rows by checking if expected header is present
+    with open(listing_path, 'r', encoding='utf-8') as f:
+        header_line = f.readline()
+
+    if "Site Number" in header_line and "Location Description" in header_line:
+        listing = pd.read_csv(listing_path)
+    else:
+        listing = pd.read_csv(listing_path, skiprows=9) #hardcoded skiprows for the SCATs site listing sheet
+    gps = pd.read_csv(gps_path)
+
+        # Rename columns for clarity and ensure SCATS column is numeric
+    listing = listing.rename(columns={"Site Number": "SCATS", "Location Description": "Location"})
+    listing["SCATS"] = pd.to_numeric(listing["SCATS"], errors="coerce")
+
+        # Merge the SCATS listing into the main DataFrame to get textual location descriptions
+    df = df.merge(listing[["SCATS", "Location"]], on="SCATS", how="left")
+
+        # Prepare uppercase versions of location descriptions for simple text matching
+    df["Location_UPPER"] = df["Location"].astype(str).str.upper()
+    gps["SITE_DESC_UPPER"] = gps["SITE_DESC"].astype(str).str.upper()
+
+        # Define a matching function that attempts to find the first word from the SCATS location in the GPS list
+    def match_gps(location):
+        if not isinstance(location, str) or len(location.strip()) == 0:
+            return pd.Series([None, None])
+        keyword = location.split()[0]  # Use the first word of the location as a basic search key
+        match = gps[gps["SITE_DESC_UPPER"].str.contains(keyword, na=False)]
+        return match[["X", "Y"]].iloc[0] if not match.empty else pd.Series([None, None])
+
+        # Apply the matching function to get coordinates for each row
+    coords = df["Location_UPPER"].apply(lambda loc: match_gps(loc))
+
+        # Assign the matched coordinates to new Longitude and Latitude columns
+    df[["Longitude", "Latitude"]] = coords
+    return df
+    
+
+def step_through_directory(directory_path="database", drop_zeros=False, listing_path=None, gps_path=None):
+    """
+    Prompts the user to step through files in a directory and select which ones to parse.
+    Each selected file is parsed using parse_traffic_data().
+    """
+    files = sorted([f for f in os.listdir(directory_path) if f.endswith(".csv") or f.endswith(".xlsx")])
+    if not files:
+        print("No compatible files found in directory.")
+        return
+
+    selected = []
+    print("Available files:")
+    for idx, f in enumerate(files):
+        print(f"  [{idx}] {f}")
+
+    while True:
+        choice = input("Enter the index of a file to parse (or 'done' to finish): ").strip()
+        if choice.lower() == 'done':
+            break
+        if not choice.isdigit() or int(choice) >= len(files):
+            print("Invalid choice. Try again.")
+            continue
+
+        filename = files[int(choice)]
+        full_path = os.path.join(directory_path, filename)
+        try:
+            df = parse_traffic_data(full_path, drop_zeros=drop_zeros, listing_path=listing_path, gps_path=gps_path)
+            print(f"Successfully parsed {filename}. Showing preview:")
+            print(df.head())
+            selected.append((filename, df))
+        except ValueError as e:
+            print(f"Failed to parse {filename}: {e}")
+
+    print(f"Parsed {len(selected)} file(s).")
+    return selected
+
+# Entry point: if script is run directly, handle command-line arguments and start processing
 if __name__ == "__main__":
     import sys
     if len(sys.argv) < 2:
-        print("Usage: python data_parser.py <file.xlsx|file.csv> [--drop-zeros]")
+        print("Usage: python data_parser.py <file|folder> [--drop-zeros] [--listing path] [--gps path]")
     else:
-        file_path = sys.argv[1]
+            # First argument is expected to be a file or folder path
+        path = sys.argv[1]
+            # Optional flag to exclude zero-volume rows
         drop = "--drop-zeros" in sys.argv
+            # Default metadata file paths for cross-referencing (used if --listing/--gps not provided)
+        default_listing = "database/SCATSSiteListingSpreadsheet_VicRoads.csv"
+        listing_path = next((sys.argv[i + 1] for i, x in enumerate(sys.argv) if x == "--listing"), default_listing)
+        default_gps = "database/Traffic_Count_Locations_with_LONG_LAT.csv"  # Default GPS dataset path
+        gps_path = next((sys.argv[i + 1] for i, x in enumerate(sys.argv) if x == "--gps"), default_gps)
+
         try:
-            parsed_df = parse_traffic_data(file_path, drop_zeros=drop)
-            print(parsed_df.head())
+                # If a folder is given, prompt the user to pick which files to process
+            if os.path.isdir(path):
+                step_through_directory(path, drop_zeros=drop, listing_path=listing_path, gps_path=gps_path)
+                # Otherwise parse a single file directly
+            else:
+                df = parse_traffic_data(path, drop_zeros=drop, listing_path=listing_path, gps_path=gps_path)
+            print(df.head())
         except ValueError as ve:
             print(f"Error: {ve}")
