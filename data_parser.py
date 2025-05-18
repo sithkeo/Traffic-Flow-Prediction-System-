@@ -4,8 +4,9 @@ Traffic Data Parser for SCATS Datasets
 - Handles both legacy `.xlsx` format (2006) and new `.csv` format (2025+)
 - Extracts 15-min interval volume data and reshapes it for time-series use
 - Option to drop zero-volume records to exclude non-traffic periods or potential noise
+- Warns user to manually convert `.xls` files (due to limited library support)
 - Allows interactive selection of files from the `database/` folder for parsing and preview
-- Adds coordinates from SCATS metadata and GPS dataset
+- Adds coordinates from SCATS metadata and GPS dataset if available
 """
 
 import pandas as pd
@@ -13,16 +14,19 @@ from datetime import timedelta
 import os
 
 
-def parse_traffic_data(filepath, drop_zeros=False):
+def parse_traffic_data(filepath, drop_zeros=False, listing_path=None, gps_path=None, max_rows=None):
     """
     Parses traffic data from file (.xlsx or .csv) and returns reshaped time-series DataFrame.
-    Supports both the 2006 Excel format and 2025 CSV format.
+    Supports both the 2006 Excel format and 2025 CSV format. Optionally merges metadata.
+
+
 
     Parameters:
         filepath (str): Path to the file.
         drop_zeros (bool): If True, removes rows where traffic volume is 0.
         listing_path (str): Optional path to SCATS site listing CSV.
         gps_path (str): Optional path to traffic location lat/lon CSV.
+        max_rows (int): If provided, limits how many raw input rows are processed (for preview/testing).
 
     Returns:
         pd.DataFrame: Time-series formatted traffic data.
@@ -33,24 +37,28 @@ def parse_traffic_data(filepath, drop_zeros=False):
             "Please convert the file to .xlsx manually (use Excel or other tools)"
         )
     elif filepath.endswith(".xlsx"):
-        df = _parse_2006_excel(filepath)
+        df = _parse_2006_excel(filepath, max_rows=max_rows)
     elif filepath.endswith(".csv"):
-        df = _parse_2025_csv(filepath)
+        df = _parse_2025_csv(filepath, max_rows=max_rows)
     else:
         raise ValueError("Unsupported file format. Only .xlsx and .csv are supported.")
 
     if drop_zeros:
         df = df[df["Volume"] != 0]
 
+    if listing_path and gps_path:
+        df = add_coordinates(df, listing_path, gps_path)
+
     return df
 
 
-def _parse_2006_excel(filepath):
+
+def _parse_2006_excel(filepath, max_rows=None):
     """
     Parses the 2006-format Excel file with volume data recorded per SCATS site per day.
     """
     xls = pd.ExcelFile(filepath)
-    df_raw = pd.read_excel(xls, sheet_name="Data", skiprows=1)
+    df_raw = pd.read_excel(xls, sheet_name="Data", skiprows=1, nrows=max_rows)
 
     metadata_cols = df_raw.columns[:10]  # SCATS site metadata
     time_cols = df_raw.columns[10:]      # V00 to V95 (15-min intervals)
@@ -74,22 +82,22 @@ def _parse_2006_excel(filepath):
     return pd.DataFrame(all_rows, columns=["SCATS", "Date", "Time", "Volume"])
 
 
-def _parse_2025_csv(filepath):
+
+def _parse_2025_csv(filepath, max_rows=None):
     """
     Parses the newer 2025-format CSV file with per-detector traffic data.
     """
-    df = pd.read_csv(filepath)
+    df = pd.read_csv(filepath, nrows=max_rows)
         # Expected 96 volume columns for each 15-minute interval of a day
     required_cols = ["NB_SCATS_SITE", "QT_INTERVAL_COUNT"] + [f"V{i:02d}" for i in range(96)]
     for col in required_cols:
         if col not in df.columns:
             raise ValueError(f"Missing required column: {col}")
-        
+
         # Convert date column to datetime to support time expansion
     df["QT_INTERVAL_COUNT"] = pd.to_datetime(df["QT_INTERVAL_COUNT"], errors="coerce")
     all_rows = []
-
-        # Expand each detector-day row into 96 rows of timestamped volume data
+      # Expand each detector-day row into 96 rows of timestamped volume data
     for _, row in df.iterrows():
         site_id = row["NB_SCATS_SITE"]
         date = row["QT_INTERVAL_COUNT"]
@@ -99,6 +107,7 @@ def _parse_2025_csv(filepath):
             all_rows.append([site_id, time.date(), time.time(), row[col]])
 
     return pd.DataFrame(all_rows, columns=["SCATS", "Date", "Time", "Volume"])
+
 
 
 def add_coordinates(df, listing_path, gps_path):
@@ -186,7 +195,7 @@ def step_through_directory(directory_path="database", drop_zeros=False, listing_
 if __name__ == "__main__":
     import sys
     if len(sys.argv) < 2:
-        print("Usage: python data_parser.py <file|folder> [--drop-zeros] [--listing path] [--gps path]")
+        print("Usage: python data_parser.py <file|folder> [--drop-zeros] [--listing path] [--gps path] [--max-rows N]")
     else:
             # First argument is expected to be a file or folder path
         path = sys.argv[1]
@@ -197,6 +206,7 @@ if __name__ == "__main__":
         listing_path = next((sys.argv[i + 1] for i, x in enumerate(sys.argv) if x == "--listing"), default_listing)
         default_gps = "database/Traffic_Count_Locations_with_LONG_LAT.csv"  # Default GPS dataset path
         gps_path = next((sys.argv[i + 1] for i, x in enumerate(sys.argv) if x == "--gps"), default_gps)
+        max_rows = next((int(sys.argv[i + 1]) for i, x in enumerate(sys.argv) if x == "--max-rows"), None)
 
         try:
                 # If a folder is given, prompt the user to pick which files to process
@@ -204,7 +214,7 @@ if __name__ == "__main__":
                 step_through_directory(path, drop_zeros=drop, listing_path=listing_path, gps_path=gps_path)
                 # Otherwise parse a single file directly
             else:
-                df = parse_traffic_data(path, drop_zeros=drop, listing_path=listing_path, gps_path=gps_path)
+                df = parse_traffic_data(path, drop_zeros=drop, listing_path=listing_path, gps_path=gps_path, max_rows=max_rows)
             print(df.head())
         except ValueError as ve:
             print(f"Error: {ve}")
