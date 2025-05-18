@@ -12,6 +12,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.preprocessing import MinMaxScaler
+from datetime import datetime
 
 # Import custom training and utility functions
 from train import train_model
@@ -71,8 +72,8 @@ def prepare_data_all_sites(df):
             print(f"[Skipping site {site_id}] Inconsistent shape: {X.shape}")
             continue
 
-            X = X.astype(np.float32)  # Ensure consistent dtype for stacking
-            y = y.astype(np.float32)  # Ensure consistent dtype for stacking
+        X = X.astype(np.float32)  # Ensure consistent dtype for stacking
+        y = y.astype(np.float32)  # Ensure consistent dtype for stacking
 
         all_X.append(X)
         all_y.append(y)
@@ -94,6 +95,11 @@ def prepare_data_all_sites(df):
     scaler.fit(y)  # Fit scaler to full target set
     return X[:split], y[:split], X[split:], y[split:], scaler
 
+
+# Ensure output subfolders exist
+os.makedirs("output/losses", exist_ok=True)
+os.makedirs("output/trained", exist_ok=True)
+os.makedirs("output/metrics", exist_ok=True)
 
 if __name__ == "__main__":
     # Set up command-line arguments
@@ -133,8 +139,47 @@ if __name__ == "__main__":
                     batch_size=args.batch_size,
                     epochs=args.epochs
                 )
+
+                # print(f"[DEBUG] History content for {model_name}: {results.get('history')}")
+                # print(f"[DEBUG] History keys: {getattr(results.get('history'), 'history', {}).keys()}")
+
+                # Save per-epoch loss history to CSV
+                if "history" in results:
+                    loss_path = f"output/losses/{model_name}_loss.csv"
+                    pd.DataFrame(results["history"].history).to_csv(loss_path, index=False)
+                    print(f"[INFO] Loss history saved to {loss_path}")
                 # Plot predictions vs actual values
                 plot_predictions(results["predictions"], results["actuals"], model_name)
+
+                # Save trained model to file
+                trained_model_path = f"output/trained/{model_name}_trained.keras"
+                results["model"].save(trained_model_path)
+                print(f"[INFO] Model saved to {trained_model_path}")
+
+                # Append training metrics to CSV log
+                metrics_path = "output/metrics/metrics.csv"
+                is_new_file = not os.path.exists(metrics_path)      
+                final_epoch = results["history"].epoch[-1]
+                final_loss = results["history"].history["loss"][final_epoch]
+                final_val_loss = results["history"].history["val_loss"][final_epoch]
+
+                results_row = {
+                    "Timestamp": datetime.now().isoformat(timespec='seconds'),
+                    "Model": model_name,
+                    "MAE": round(results["mae"], 2),
+                    "RMSE": round(results["rmse"], 2),
+                    "MAE_%": round(100 * results["mae"] / np.mean(results["actuals"]), 2),
+                    "Site": args.site if args.site else "ALL",
+                    "Epochs": args.epochs,
+                    "BatchSize": args.batch_size,
+                    "FinalLoss": round(final_loss, 6),
+                    "FinalValLoss": round(final_val_loss, 6)
+                }
+
+                pd.DataFrame([results_row]).to_csv(
+                    metrics_path, mode="a", header=is_new_file, index=False
+                )
+                print(f"[INFO] Metrics written to {metrics_path}")
             except Exception as model_err:
                 print(f"[ERROR loading/training {model_name}] {model_err}")
 
