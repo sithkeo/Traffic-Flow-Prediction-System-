@@ -56,6 +56,10 @@ def parse_traffic_data(filepath, drop_zeros=False, listing_path=None, gps_path=N
         df = add_coordinates(df, listing_path, gps_path)
 
         df.drop(columns=["Location_UPPER"], errors="ignore", inplace=True)
+        # Drop rows that are missing either Latitude or Longitude
+    if "Longitude" in df.columns and "Latitude" in df.columns:
+        df = df.dropna(subset=["Longitude", "Latitude"])
+        df = df[(df["Longitude"] != 0.0) & (df["Latitude"] != 0.0)]
     return df
 
 
@@ -243,20 +247,11 @@ if __name__ == "__main__":
             if os.path.isdir(path):
                 selected_dfs = step_through_directory(path, drop_zeros=drop, listing_path=listing_path, gps_path=gps_path)
                 for filename, df in selected_dfs:
-                    print(df.head())
-                    print(f"Saved to output/{os.path.splitext(filename)[0].replace(' ', '_')}_parsed.csv")
-            # Otherwise parse a single file directly
-            else:
-                df = parse_traffic_data(path, drop_zeros=drop, listing_path=listing_path, gps_path=gps_path, max_rows=max_rows)
-            print(df.head())
-
-            # Save the parsed DataFrame to a CSV file
-            filename = os.path.splitext(os.path.basename(path))[0].replace(" ", "_")
-            # Ensure the output directory exists
-            os.makedirs("output", exist_ok=True)
-            output_path = f"output/{filename}_parsed.csv"
-            df.to_csv(output_path, index=False)
-            print(f"Saved to {output_path}")
+                    #print(df.head())
+                    name, _ = os.path.splitext(filename)
+                    base_name = name.replace(" ", "_")
+                    preview_path = os.path.join("output", f"{base_name}_parsed.csv")
+                    print(f"Saved to {preview_path}")
 
         except ValueError as ve:
             print(f"Error: {ve}")
