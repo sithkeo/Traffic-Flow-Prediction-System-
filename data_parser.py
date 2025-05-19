@@ -198,6 +198,23 @@ def step_through_directory(directory_path="database", drop_zeros=False, listing_
             print(f"Successfully parsed {filename}. Showing preview:")
             print(df.head())
             selected.append((filename, df))
+            # Save the parsed DataFrame to a CSV file
+            os.makedirs("output", exist_ok=True)
+            name, _ = os.path.splitext(filename)
+            base_name = name.replace(" ", "_")
+            output_path = os.path.join("output", f"{base_name}_parsed.csv")
+            if os.path.exists(output_path):
+                response = input(f"{output_path} already exists. Overwrite? (y/n): ").strip().lower()
+                if response != 'y':
+                    counter = 1
+                    while True:
+                        alt_path = os.path.join("output", f"{base_name}_parsed_{counter}.csv")
+                        if not os.path.exists(alt_path):
+                            output_path = alt_path
+                            break
+                        counter += 1
+            df.to_csv(output_path, index=False)
+            print(f"Saved to {output_path}")
         except ValueError as e:
             print(f"Failed to parse {filename}: {e}")
 
@@ -224,7 +241,10 @@ if __name__ == "__main__":
         try:
             # If a folder is given, prompt the user to pick which files to process
             if os.path.isdir(path):
-                step_through_directory(path, drop_zeros=drop, listing_path=listing_path, gps_path=gps_path)
+                selected_dfs = step_through_directory(path, drop_zeros=drop, listing_path=listing_path, gps_path=gps_path)
+                for filename, df in selected_dfs:
+                    print(df.head())
+                    print(f"Saved to output/{os.path.splitext(filename)[0].replace(' ', '_')}_parsed.csv")
             # Otherwise parse a single file directly
             else:
                 df = parse_traffic_data(path, drop_zeros=drop, listing_path=listing_path, gps_path=gps_path, max_rows=max_rows)
