@@ -44,7 +44,7 @@ def snap_sites_to_graph(G, sites):
     return gdf
 
 def example_routing(G, snapped_sites):
-    """Prompt user to select two SCATS IDs and return up to 5 alternate routes with estimated travel times."""
+    """Prompt user to select two SCATS IDs and return a single route."""
     print("Available SCATS sites:")
     print(snapped_sites[['SCATS', 'Location']].drop_duplicates().to_string(index=False))
 
@@ -58,32 +58,13 @@ def example_routing(G, snapped_sites):
         print("Invalid SCATS ID entered. Aborting routing.")
         return []
 
-    # Find up to 5 shortest simple paths using length as cost
     try:
-        routes = list(nx.shortest_simple_paths(G, start_node, end_node, weight='length'))
-        selected_routes = routes[:5]
+        route = nx.shortest_path(G, start_node, end_node, weight='length')
+        print(f"Route found between SCATS {start_id} and SCATS {end_id}, {len(route)} nodes long.")
+        return route
     except nx.NetworkXNoPath:
         print(f"No route found between SCATS {start_id} and SCATS {end_id}.")
         return []
-
-    def estimate_travel_time(route):
-        intersection_delay = 30  # seconds
-        total_distance = sum(ox.distance.euclidean_dist_vec(
-            G.nodes[route[i]]['y'], G.nodes[route[i]]['x'],
-            G.nodes[route[i+1]]['y'], G.nodes[route[i+1]]['x']
-        ) for i in range(len(route) - 1))  # meters
-
-        # Assume 60km/h = 16.67 m/s
-        travel_time = total_distance / 16.67
-        total_delay = len(route) * intersection_delay
-        return travel_time + total_delay
-
-    print(f"Top 5 route options from SCATS {start_id} to SCATS {end_id}:")
-    for i, r in enumerate(selected_routes):
-        est_time = estimate_travel_time(r)
-        print(f"Route {i+1}: {len(r)} nodes, estimated time: {int(est_time)} seconds")
-
-        return selected_routes[0] if selected_routes else []
 
 def save_route_to_map(G, route, output_path="scats_route_map.html", snapped_sites=None, show_route=True):
     """Visualise the computed route with Folium."""
