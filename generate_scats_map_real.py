@@ -59,7 +59,7 @@ def example_routing(G, snapped_sites):
         return []
 
     try:
-        route = nx.shortest_path(G, start_node, end_node, weight='length')
+        route = nx.shortest_path(G, start_node, end_node, weight='travel_time')
         print(f"Route found between SCATS {start_id} and SCATS {end_id}, {len(route)} nodes long.")
         return route
     except nx.NetworkXNoPath:
@@ -104,10 +104,47 @@ def save_route_to_map(G, route, output_path="scats_route_map.html", snapped_site
     m.save(output_path)
     print(f"\nRoute map saved to: {output_path}")
 
+def compute_travel_time_weights(G, scats_volume_by_node):
+    """Assign travel time to each edge in G based on SCATS flow data and distance."""
+    for u, v, data in G.edges(data=True):
+        dist_m = data.get("length", 0)
+        dist_km = dist_m / 1000
+
+        # Estimate flow using SCATS data for node v (destination)
+        volume = scats_volume_by_node.get(v, 0)
+
+        # Solve inverted speed formula
+        a, b = -1.4648375, 93.75
+        discriminant = b**2 - 4 * a * (-volume)
+        if discriminant < 0:
+            speed = 60  # fallback to max speed if no real solution
+        else:
+            root1 = (b + discriminant**0.5) / (2 * a)
+            root2 = (b - discriminant**0.5) / (2 * a)
+            speed = min(root1, root2) if volume > 351 else max(root1, root2)
+
+        speed = max(speed, 5)  # prevent zero or negative speed
+        travel_time = (dist_km / speed) * 3600 + 30  # in seconds with 30s delay
+        data["travel_time"] = travel_time
+
+    print("Assigned travel_time to all edges using SCATS volume estimates.")
+
+
 if __name__ == "__main__":
     csv_path = "output/Scats_Data_October_2006_parsed.csv"
     sites = load_scats_sites(csv_path)
     G = build_road_graph(sites)
+
+    # Load SCATS volume data and compute average volume per site for travel time estimation
+    volume_df = pd.read_csv(csv_path)
+    scats_avg_volume = volume_df.groupby("SCATS")["Volume"].mean().to_dict()
+
+    snapped_sites = snap_sites_to_graph(G, sites)
+    scats_volume_by_node = {
+        row["nearest_node"]: scats_avg_volume.get(row["SCATS"], 0)
+        for _, row in snapped_sites.iterrows()
+    }
+    compute_travel_time_weights(G, scats_volume_by_node)
     snapped_sites = snap_sites_to_graph(G, sites)
     route = example_routing(G, snapped_sites)
     save_route_to_map(G, route, snapped_sites=snapped_sites, show_route=True)  # Set to False to hide route
