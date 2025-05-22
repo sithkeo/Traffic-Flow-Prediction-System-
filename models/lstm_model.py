@@ -7,7 +7,7 @@ making it more robust than a basic single-layer LSTM.
 """
 
 from keras.models import Sequential
-from keras.layers import LSTM, Dense, Dropout
+from keras.layers import LSTM, Dense, Dropout, Input
 
 def build_model(input_shape):
     """
@@ -31,10 +31,13 @@ def build_model(input_shape):
         and follows best practices for sequence prediction tasks.
     """
     model = Sequential()
-    model.add(LSTM(64, return_sequences=True, input_shape=input_shape))  # First LSTM layer returns sequence
+    model.add(Input(shape=input_shape))                                  # Explicit Input layer   
+    model.add(LSTM(64, return_sequences=True))                           # First LSTM layer returns sequence
     model.add(LSTM(32))                                                  # Second LSTM layer outputs summary vector
     model.add(Dropout(0.2))                                              # Regularisation
     model.add(Dense(1))                                                  # Output layer for regression
 
     model.compile(optimizer='adam', loss='mse')                          # Regression loss
     return model
+
+# Documentation on LSTM layer : https://keras.io/api/layers/recurrent_layers/lstm/

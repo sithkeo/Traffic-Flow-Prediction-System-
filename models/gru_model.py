@@ -6,7 +6,7 @@ This is an alternative to LSTM with fewer parameters and faster training.
 """
 
 from keras.models import Sequential
-from keras.layers import GRU, Dense, Dropout
+from keras.layers import GRU, Dense, Dropout, Input
 
 def build_model(input_shape):
     """
@@ -25,10 +25,13 @@ def build_model(input_shape):
         keras.Model: Compiled GRU model ready for training.
     """
     model = Sequential()
-    model.add(GRU(64, return_sequences=True, input_shape=input_shape))
-    model.add(GRU(32))
-    model.add(Dropout(0.2))
-    model.add(Dense(1))  # Linear activation for continuous output
+    model.add(Input(shape=input_shape))               # Explicit Input layer
+    model.add(GRU(64, return_sequences=True))         # First GRU layer
+    model.add(GRU(32))                                # Second GRU layer
+    model.add(Dropout(0.2))                           # Regularisation
+    model.add(Dense(1))                               # Output layer for regression
 
     model.compile(optimizer='adam', loss='mse')
     return model
+
+# Documentation on GRU layer : https://keras.io/api/layers/recurrent_layers/gru/
