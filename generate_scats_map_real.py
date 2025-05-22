@@ -44,7 +44,7 @@ def snap_sites_to_graph(G, sites):
     return gdf
 
 def example_routing(G, snapped_sites):
-    """Prompt user to select two SCATS IDs and return a single route."""
+    """Prompt user to select SCATS IDs, show 5 routes with times, and return selected one."""
     print("Available SCATS sites:")
     print(snapped_sites[['SCATS', 'Location']].drop_duplicates().to_string(index=False))
 
@@ -59,12 +59,31 @@ def example_routing(G, snapped_sites):
         return []
 
     try:
-        route = nx.shortest_path(G, start_node, end_node, weight='travel_time')
-        print(f"Route found between SCATS {start_id} and SCATS {end_id}, {len(route)} nodes long.")
-        return route
+        from itertools import islice
+        route_generator = nx.shortest_simple_paths(G, start_node, end_node, weight='travel_time')
+        top_routes = list(islice(route_generator, 5))
+
+        def estimate_time(route):
+            return sum(G[u][v]["travel_time"] for u, v in zip(route[:-1], route[1:]))
+
+        print("Top 5 route options:")
+        for i, route in enumerate(top_routes):
+            time = estimate_time(route)
+            print(f"{i+1}: {len(route)} nodes, estimated travel time: {int(time)} seconds")
+
+        choice = input("Select a route number to visualise (1–5): ").strip()
+        try:
+            index = int(choice) - 1
+            return top_routes[index] if 0 <= index < len(top_routes) else []
+        except ValueError:
+            print("Invalid choice. Returning first route by default.")
+            return top_routes[0]
+
     except nx.NetworkXNoPath:
         print(f"No route found between SCATS {start_id} and SCATS {end_id}.")
         return []
+
+    
 
 def save_route_to_map(G, route, output_path="scats_route_map.html", snapped_sites=None, show_route=True):
     """Visualise the computed route with Folium."""
@@ -102,7 +121,8 @@ def save_route_to_map(G, route, output_path="scats_route_map.html", snapped_site
 
     m.fit_bounds(route_coords)
     m.save(output_path)
-    print(f"\nRoute map saved to: {output_path}")
+    print(f"Route map saved to: {output_path}")
+    return m
 
 def compute_travel_time_weights(G, scats_volume_by_node):
     """Assign travel time to each edge in G based on SCATS flow data and distance."""
