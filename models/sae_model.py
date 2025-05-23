@@ -40,3 +40,8 @@ def build_model(input_shape):
 
     model.compile(optimizer='adam', loss='mse')   # Regression setup
     return model
+
+# Documentation on Dense layer : https://keras.io/api/layers/core_layers/dense/
+# Documentation on Dropout layer : https://keras.io/api/layers/core_layers/dropout/
+# Documentation on Flatten layer : https://keras.io/api/layers/core_layers/flatten/
+# Documentation on Sequential model : https://keras.io/api/models/sequential/
