@@ -194,7 +194,7 @@ class TrafficFlowGUI(tk.Tk):
                     return float(r["Longitude"])+0.00123, float(r["Latitude"])+0.00123, r.get("Site description","")
         return None
 
-    # ----- Generate -----
+    # ----- Generate # TODO FIX VEH/5MIN | CURRENTLY JUST PLACEHOLDER AND DISPLAYS 60/5MIN CAUSE NO MODEL DATA -----
     def _generate(self):
         src,dst,mdl=self._src.get().strip(),self._dest.get().strip(),self._model.get().upper()
         if not src or not dst:
@@ -234,11 +234,35 @@ class TrafficFlowGUI(tk.Tk):
             messagebox.showerror("Missing","Install 'folium'"); return
         fmap=folium.Map(location=[-37.831219,145.056965],zoom_start=13,tiles="cartodbpositron")
         if self.generated:
-            folium.GeoJson(self._geojson()).add_to(fmap)
-            start,end=self.generated[0][2][0],self.generated[0][2][-1]
-            for sc,col in ((start,"red"),(end,"green")):
-                if (c:=self._coords(sc)):
-                    lon,lat,desc=c; folium.Marker([lat,lon],popup=f"<b>{'Start' if col=='red' else 'Finish'}</b><br>SCATS {sc}<br>{desc}",icon=folium.Icon(color=col)).add_to(fmap)
+            for idx, (t, dist, path, flow) in enumerate(self.generated):
+                coords = [
+                    [lat, lon]                       # Folium wants [lat, lon]
+                    for sc in path
+                    if (c := self._coords(sc))       # look-up lat/lon for every SCATS
+                    for lon, lat, *_ in [c]          # unpack tuple
+                ]
+                if not coords:
+                    continue
+
+                folium.PolyLine(
+                    coords,
+                    color="#3484F0" if idx == 0 else "#363636",
+                    weight=6 if idx == 0 else 3,
+                    opacity=0.9 if idx == 0 else 0.65,
+                ).add_to(fmap)
+
+            # Mark start & end of the *best* (blue) route
+            best_path = self.generated[0][2]                # Path list is in slot 2
+            if best_path:
+                start_sc, end_sc = best_path[0], best_path[-1]
+                for sc_id, col in ((start_sc, "green"), (end_sc, "red")):
+                    if (c := self._coords(sc_id)):
+                        lon, lat, desc = c
+                        folium.Marker(
+                            [lat, lon],
+                            popup=f"SCATS {sc_id}<br>{desc}",
+                            icon=folium.Icon(color=col),
+                        ).add_to(fmap)
         self._draw_nodes(fmap); fmap.save("index.html"); webbrowser.open("index.html")
 
 # ═════ main ═════
