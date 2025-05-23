@@ -58,7 +58,7 @@ def train_model(model_module, X_train, y_train, X_test, y_test, scaler,
         epochs=epochs,
         batch_size=batch_size,
         callbacks=[early_stop],
-        verbose=0
+        verbose=1 # Set to 0 for no output, 1 for progress bar, 2 for one line per epoch
     )
 
     if history is None:
