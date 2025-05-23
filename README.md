@@ -13,18 +13,22 @@ It includes a Travel Time Estimation based on each edge of the map from the isol
 # Installation
 1. Clone this repository:
     Either Via Option A | Option B
+    ----
     Option A
     ```bash
     git clone https://github.com/sithkeo/Traffic-Flow-Prediction-System-
     ```
+    ----
     Option B
     ![evaluate](/images/clone.png)  <!-- Need to Grab Photo -->
-    Follow with these Steps
+    
+        Follow with these Steps
+
 2. (Optional) Create a Virtual Environment and Activate it:
     ```bash
-    python -m venv venv
-    source venv/bin/activate  # Used for Linux/Mac Users
-    venv\Scripts\activate.bat # Used for Windows Users
+    python -m venv .venv
+    source .venv/bin/activate  # Used for Linux/Mac Users
+    .venv\Scripts\activate.bat # Used for Windows Users
     ```
 3. Install the Required Dependencies (Provided inside the `requirements.txt`):
     ```bash
@@ -32,9 +36,37 @@ It includes a Travel Time Estimation based on each edge of the map from the isol
     ```
 
 # Usage
-How to Use
-<>
+1. Train all models on a specific SCATS site:
+    python main.py output/Scats_Data_October_2006_parsed.csv --site 970
 
+2. Train models on all sites:
+    python main.py output/Scats_Data_October_2006_parsed.csv --all-sites
+3. Train only selected models:
+    python main.py output/Scats_Data_October_2006_parsed.csv --site 970 --models gru_model lstm_model
+4. Adjust training settings:
+    python main.py output/Scats_Data_October_2006_parsed.csv --site 970 --epochs 100 --batch_size 16
+
+# generate_predicted_site_volumes.py
+    Predict average traffic volume for each SCATS site using a trained model.
+- python generate_predicted_site_volumes.py
+    Prompts for SCATS CSV input and model selection (GRU, LSTM, SAE)
+
+Automatically saves output to:
+- output/predicted/{model}_site_predictions.csv
+    Used as input for model-based route estimation
+
+# generate_scats_map_real.py
+    Generates a road network from SCATS sensor data, calculates edge weights using model-predicted traffic, and computes optimal routes.
+# python generate_scats_map_real.py
+- Uses output/predicted/{model}_site_predictions.csv for travel time weights
+- Prompts for origin and destination SCATS IDs
+- Computes top 5 shortest paths, selects the fastest based on estimated time
+- Travel time is calculated using speed derived from predicted flow and includes a 30-second delay per SCATS-controlled intersection
+- Saves output map to scats_route_map.html
+
+# python gui.py
+    Opens a GUI Version of the application that presents SCAT ID's that can be entered, alongside the Model Type to be used
+    Which then generates routes and visually graphs it onto index.html
 
 UML displaying the model
     ![uml](images/uml.png)  <!-- Need to Grab/Download Final Photo-->
