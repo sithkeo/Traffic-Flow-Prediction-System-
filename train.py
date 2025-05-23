@@ -1,12 +1,18 @@
 # train.py
 
+# Training Strategy Notes:
+# - We use 90% of training data for actual training and 10% for validation.
+# - EarlyStopping monitors this validation loss to decide when to stop.
+# - This helps avoid wasted computation and results in a more generalisable model.
+# - Training can still run up to `epochs` if improvements continue.
+
 """
 Handles model training logic in a reusable, modular format.
 Used by main.py or external scripts.
 """
 
 import numpy as np
-from tensorflow.keras.callbacks import EarlyStopping  # Use TF-compatible callback
+from tensorflow.keras.callbacks import EarlyStopping
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 
 
@@ -25,16 +31,11 @@ def train_model(model_module, X_train, y_train, X_test, y_test, scaler,
 
     Returns:
         dict with predictions, actuals, MAE, RMSE, model object
-
-    Notes:
-        - The model is expected to be compiled within the build_model function.
-        - Outputs include both scaled and rescaled predictions.
-        - Metrics printed to console for model evaluation.
     """
     model_name = model_module.__name__.split('.')[-1].replace('_model', '').upper()
     print(f"\n--- Training {model_name} ---")
 
-    # Determine shape for LSTM or flattened input
+    # Determine input shape depending on data type (sequence or flat)
     is_sequence = len(X_train.shape) == 3
     input_shape = X_train.shape[1:] if is_sequence else (X_train.shape[1],)
     X_train_model = X_train if is_sequence else X_train.reshape(X_train.shape[0], -1)
@@ -42,9 +43,15 @@ def train_model(model_module, X_train, y_train, X_test, y_test, scaler,
 
     # Build and compile model
     model = model_module.build_model(input_shape)
-    early_stop = EarlyStopping(monitor="val_loss", patience=5, restore_best_weights=True)
 
-    # Train the model
+    # NOTE: EarlyStopping stops training once validation loss stops improving
+    early_stop = EarlyStopping(
+        monitor="val_loss",         # Track validation loss, not training loss
+        patience=5,                 # Wait 5 epochs before stopping
+        restore_best_weights=True   # Revert to best-performing weights
+    )
+
+    # Train model with 10% of training data used for validation
     history = model.fit(
         X_train_model, y_train,
         validation_split=0.1,
@@ -55,11 +62,11 @@ def train_model(model_module, X_train, y_train, X_test, y_test, scaler,
     )
 
     if history is None:
-        raise RuntimeError("[ERROR] model.fit() did not return a history object. Check Keras/TensorFlow versions.")
+        raise RuntimeError("[ERROR] model.fit() did not return a history object.")
     else:
         print("[DEBUG] Training history captured successfully.")
-    
-    # Save the trained model
+
+    # Save trained model
     model.save(f"output/{model_name}_trained.keras")
     print(f"[INFO] Model saved to output/{model_name}_trained.keras")
 
@@ -68,7 +75,7 @@ def train_model(model_module, X_train, y_train, X_test, y_test, scaler,
     preds_rescaled = scaler.inverse_transform(preds)
     y_test_rescaled = scaler.inverse_transform(y_test.reshape(-1, 1))
 
-    # Evaluate
+    # Evaluate performance
     mae = mean_absolute_error(y_test_rescaled, preds_rescaled)
     rmse = mean_squared_error(y_test_rescaled, preds_rescaled) ** 0.5
     avg_volume = np.mean(y_test_rescaled)
@@ -82,5 +89,6 @@ def train_model(model_module, X_train, y_train, X_test, y_test, scaler,
         "actuals": y_test_rescaled,
         "mae": mae,
         "rmse": rmse,
-        "history": history  # Include training history for per-epoch loss logging
+        "history": history
     }
+
