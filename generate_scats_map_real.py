@@ -60,7 +60,23 @@ def load_predicted_volumes(predicted_csv):
 
 
 def compute_travel_time_weights(G, scats_volume_by_node):
-    """Assign travel time to each edge in G based on SCATS volume and distance."""
+    """
+    Assign travel time to each edge in the road graph G based on predicted SCATS site traffic volumes.
+
+    For each edge (u -> v):
+    - Retrieves the distance (in metres) and converts to km
+    - Looks up the predicted hourly volume at node v
+    - Applies the provided quadratic formula to estimate speed:
+          flow = -1.4648375 * speed^2 + 93.75 * speed
+    - Rearranged to compute speed from flow using the quadratic formula
+    - Caps minimum speed at 5 km/h to avoid unrealistic low values
+    - Computes travel time in seconds as:
+          travel_time = (distance_km / speed) * 3600
+      (no flat penalty is applied per edge)
+
+    Integrates our trained ML-predicted SCATS volumes directly into the routing graph,
+    giving better travel time estimates based on modelled traffic conditions.
+    """
     for u, v, data in G.edges(data=True):
         dist_m = data.get("length", 0)
         dist_km = dist_m / 1000
@@ -117,17 +133,6 @@ def example_routing(G, snapped_sites):
         print("No path found between selected SCATS sites.")
         return []
 
-    # NOTE: This fallback shortest_path call is now unreachable due to the use of top-5 best path selection.
-    # It is retained below for reference but should be removed if unused.
-    # try:
-    #     route = nx.shortest_path(G, start_node, end_node, weight='travel_time')
-    #     print(f"Route found from {start_id} to {end_id}, {len(route)} nodes.")
-    #     return route
-    # except nx.NetworkXNoPath:
-    #     print("No path found between selected SCATS sites.")
-    #     return []
-
-
 def save_route_to_map(G, route, output_path="scats_route_map.html", snapped_sites=None, show_route=True):
     """Visualise the route and SCATS nodes on a map using Folium."""
     m = folium.Map(tiles="OpenStreetMap", control_scale=True)
@@ -183,4 +188,4 @@ if __name__ == "__main__":
 
     compute_travel_time_weights(G, scats_volume_by_node)
     route = example_routing(G, snapped_sites)
-    save_route_to_map(G, route, snapped_sites=snapped_sites, show_route=True)
+    save_route_to_map(G, route, snapped_sites=snapped_sites, show_route=True) # False to hide route
