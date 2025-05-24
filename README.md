@@ -68,9 +68,6 @@ Automatically saves output to:
     Opens a GUI Version of the application that presents SCAT ID's that can be entered, alongside the Model Type to be used
     Which then generates routes and visually graphs it onto index.html
 
-UML displaying the model
-    ![uml](images/uml.png)  <!-- Need to Grab/Download Final Photo-->
-
 # Contact
 - Maintainer (@sithkeo)
 - Repo Link: [https://github.com/sithkeo/Traffic-Flow-Prediction-System-]
