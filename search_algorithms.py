@@ -106,7 +106,8 @@ def dfs(origin, destinations, edges, debug=False):
 # Greedy Best-First Search (informed but not optimal)
 # Expands the node that appears closest to the goal (based on h(n) only)
 def gbfs(origin, destinations, edges, coords, debug=False):
-    print("[GBFS] Starting greedy best-first search")
+    if debug:
+        print(f"  [ADD] Node {neighbor} (h={h:.2f})")
     goal = min(destinations, key=lambda d: heuristic(origin, d, coords))
     start = Node(origin, heuristic=heuristic(origin, goal, coords))
 
@@ -135,7 +136,8 @@ def gbfs(origin, destinations, edges, coords, debug=False):
         for neighbor in sorted(edges.get(node.state, {})):
             if neighbor not in explored and neighbor not in frontier_states:
                 h = heuristic(neighbor, goal, coords)
-                print(f"  [ADD] Node {neighbor} (h={h:.2f})")
+                if debug:
+                    print(f"  [ADD] Node {neighbor} (h={h:.2f})")
                 new_node = Node(neighbor, node, 0, h)  # g(n)=0 because GBFS doesn't use path cost
                 heapq.heappush(frontier, (h, neighbor, next(counter), new_node))
                 frontier_states.add(neighbor)
