@@ -21,7 +21,7 @@ It includes a Travel Time Estimation based on each edge of the map from the isol
     ----
     Option B - Click the Blue Clone Feature to open a query, when followed, produces a cloned Git Repo, onto your device.
 
-    ![evaluate](/images/clone.png)
+    ![evaluate](images/clone.png)
 
 2. (Optional) Create a Virtual Environment and Activate it:
     ```bash
@@ -71,7 +71,7 @@ Used as input for model-based route estimation
 Generates a road network from SCATS sensor data, calculates edge weights using model-predicted traffic, and computes optimal routes.
 
 # python routing.py
-Uses `output/predicted/{model}_site_predictions.csv for travel time weights`
+Uses `output/predicted/{model}_site_predictions.csv` for travel time weights
 - Prompts for origin and destination SCATS IDs
 - Computes top 5 shortest paths, selects the fastest based on estimated time
 - Travel time is calculated using speed derived from predicted flow and includes a 30-second delay per SCATS-controlled intersection
