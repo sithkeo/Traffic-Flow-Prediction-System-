@@ -5,7 +5,7 @@ Traffic Data Parser for SCATS Datasets
 - Extracts 15-min interval volume data and reshapes it for time-series use
 - Option to drop zero-volume records to exclude non-traffic periods or potential noise
 - Warns user to manually convert `.xls` files (due to limited library support)
-- Supports batch parsing from `database/` folder and saves parsed output as CSV
+- Supports batch parsing from `data/` folder and saves parsed output as CSV
 """
 
 import pandas as pd

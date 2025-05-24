@@ -5,7 +5,7 @@ Traffic Data Parser for SCATS Datasets
 - Extracts 15-min interval volume data and reshapes it for time-series use
 - Option to drop zero-volume records to exclude non-traffic periods or potential noise
 - Warns user to manually convert `.xls` files (due to limited library support)
-- Allows interactive selection of files from the `database/` folder for parsing and preview
+- Allows interactive selection of files from the `data/` folder for parsing and preview
 - Adds coordinates from SCATS metadata and GPS dataset if available
 """
 
@@ -236,9 +236,9 @@ if __name__ == "__main__":
         # Optional flag to exclude zero-volume rows
         drop = "--drop-zeros" in sys.argv
         # Default metadata file paths for cross-referencing (used if --listing/--gps not provided)
-        default_listing = "database/SCATSSiteListingSpreadsheet_VicRoads.csv"
+        default_listing = "data/SCATSSiteListingSpreadsheet_VicRoads.csv"
         listing_path = next((sys.argv[i + 1] for i, x in enumerate(sys.argv) if x == "--listing"), default_listing)
-        default_gps = "database/Traffic_Count_Locations_with_LONG_LAT.csv"  # Default GPS dataset path
+        default_gps = "data/Traffic_Count_Locations_with_LONG_LAT.csv"  # Default GPS dataset path
         gps_path = next((sys.argv[i + 1] for i, x in enumerate(sys.argv) if x == "--gps"), default_gps)
         max_rows = next((int(sys.argv[i + 1]) for i, x in enumerate(sys.argv) if x == "--max-rows"), None)
 

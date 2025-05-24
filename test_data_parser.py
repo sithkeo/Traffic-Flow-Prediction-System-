@@ -12,20 +12,20 @@ class TestTrafficParser(unittest.TestCase):
 
         # Ensure that a valid CSV is parsed into a proper DataFrame with expected columns.
     def test_parse_valid_csv(self):
-        df = parse_traffic_data("database/VSDATA_20250501.csv")
+        df = parse_traffic_data("data/VSDATA_20250501.csv")
         self.assertIsInstance(df, pd.DataFrame)
         self.assertIn("SCATS", df.columns)
         self.assertEqual(len(df.columns), 4)
 
         # Ensure that a valid XLSX file (2006 format) is parsed properly.
     def test_parse_valid_xlsx(self):
-        df = parse_traffic_data("database/Scats Data October 2006.xlsx")
+        df = parse_traffic_data("data/Scats Data October 2006.xlsx")
         self.assertIsInstance(df, pd.DataFrame)
         self.assertEqual(len(df.columns), 4)
 
         # Check that rows with zero volume are correctly dropped when drop_zeros=True.
     def test_drop_zeros(self):
-        df = parse_traffic_data("database/VSDATA_20250501.csv", drop_zeros=True)
+        df = parse_traffic_data("data/VSDATA_20250501.csv", drop_zeros=True)
         self.assertTrue((df["Volume"] != 0).all())
 
         # Test that unsupported file types raise a ValueError.
@@ -37,7 +37,7 @@ class TestTrafficParser(unittest.TestCase):
         # Test that .xls files are explicitly rejected with conversion warning.
     def test_reject_xls_warning(self):
         with self.assertRaises(ValueError) as context:
-            parse_traffic_data("database/Scats Data October 2006.xls")
+            parse_traffic_data("data/Scats Data October 2006.xls")
         self.assertIn(".xls format is not supported", str(context.exception))
 
 
@@ -51,8 +51,8 @@ class TestTrafficParser(unittest.TestCase):
         })
         enriched = add_coordinates(
             df,
-            "database/SCATSSiteListingSpreadsheet_VicRoads.csv",
-            "database/Traffic_Count_Locations_with_LONG_LAT.csv"
+            "data/SCATSSiteListingSpreadsheet_VicRoads.csv",
+            "data/Traffic_Count_Locations_with_LONG_LAT.csv"
         )
         self.assertIn("Longitude", enriched.columns)
         self.assertIn("Latitude", enriched.columns)

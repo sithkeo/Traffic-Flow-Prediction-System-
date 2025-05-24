@@ -9,8 +9,8 @@ import pandas as pd
 from data_parser import parse_traffic_data
 
 # Default metadata paths for coordinate matching (used if applicable)
-listing_path = "database/SCATSSiteListingSpreadsheet_VicRoads.csv"
-gps_path = "database/Traffic_Count_Locations_with_LONG_LAT.csv"
+listing_path = "data/SCATSSiteListingSpreadsheet_VicRoads.csv"
+gps_path = "data/Traffic_Count_Locations_with_LONG_LAT.csv"
 
 def preview():
     files = sorted([f for f in os.listdir("database") if f.endswith(".csv") or f.endswith(".xlsx")])
