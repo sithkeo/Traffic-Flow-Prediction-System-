@@ -55,9 +55,9 @@ Automatically saves output to:
 - output/predicted/{model}_site_predictions.csv
     Used as input for model-based route estimation
 
-# generate_scats_map_real.py
+# routing.py
     Generates a road network from SCATS sensor data, calculates edge weights using model-predicted traffic, and computes optimal routes.
-# python generate_scats_map_real.py
+# python routing.py
 - Uses output/predicted/{model}_site_predictions.csv for travel time weights
 - Prompts for origin and destination SCATS IDs
 - Computes top 5 shortest paths, selects the fastest based on estimated time
