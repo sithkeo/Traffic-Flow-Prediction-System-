@@ -15,6 +15,9 @@ from geopandas import GeoDataFrame
 import folium
 import matplotlib.pyplot as plt
 
+# Ensure output directories exist
+ROUTE_OUTPUT_DIR = "output/routes"
+os.makedirs(ROUTE_OUTPUT_DIR, exist_ok=True)
 
 def load_scats_sites(csv_path):
     """Load SCATS site locations from CSV and exclude invalid coordinates."""
@@ -29,15 +32,50 @@ def load_scats_sites(csv_path):
     return sites
 
 
+def simplify_to_digraph_by_weight(G_multi, weight="travel_time"):
+    """Collapse a MultiDiGraph into a DiGraph, preserving the edge with the lowest weight."""
+    G_simple = nx.DiGraph()
+
+    for u, v, data in G_multi.edges(data=True):
+        w = data.get(weight, float("inf"))
+        if G_simple.has_edge(u, v):
+            if w < G_simple[u][v].get(weight, float("inf")):
+                G_simple[u][v] = data  # Replace with lower-weight edge
+        else:
+            G_simple.add_edge(u, v, **data)
+
+    return G_simple
+
+
 def build_road_graph(sites, buffer_km=2):
-    """Build road graph using convex hull of all SCATS points."""
-    from shapely.geometry import MultiPoint
     import geopandas as gpd
 
+    # Build convex hull around SCATS sites and buffer it
     points = [Point(xy) for xy in zip(sites["Longitude"], sites["Latitude"])]
     polygon = gpd.GeoSeries(points).union_all().convex_hull.buffer(buffer_km / 111)
-    G = ox.graph_from_polygon(polygon, network_type='drive')
-    return nx.DiGraph(G)  # Convert to DiGraph for shortest path compatibility
+
+    # Filter OSM ways to include only valid driving roads
+    custom_filter = (
+        '["highway"~"motorway|trunk|primary|secondary|tertiary|residential|unclassified"]'
+    )
+    G_multi = ox.graph_from_polygon(polygon, custom_filter=custom_filter)
+
+    # DEBUG: Visualisation before pruning (optional)
+    # ox.plot_graph(G_multi, node_color='blue', edge_color='gray', node_size=5, figsize=(12, 12))
+
+    # Convert MultiDiGraph to DiGraph (removes parallel edges)
+    # OSMnx returns MultiDiGraph by default, which complicates routing and makes calculations slower.
+    # For routing car traffic only, DiGraph after filtering works better and avoids the complexity of dealing with edge keys.
+    G = nx.DiGraph(G_multi)
+
+    # Restore CRS to enable spatial snapping
+    G.graph["crs"] = G_multi.graph.get("crs", "EPSG:4326")
+
+    # Prune to largest strongly connected component
+    G = G.subgraph(max(nx.strongly_connected_components(G), key=len)).copy()
+    print(f"[DEBUG] Pruned to largest strongly connected component: {G.number_of_nodes()} nodes, {G.number_of_edges()} edges")
+
+    return G
 
 
 def snap_sites_to_graph(G, sites):
@@ -170,14 +208,15 @@ def save_route_to_map(G, route, output_path="scats_route_map.html", snapped_site
 
     if snapped_sites is not None:
         for _, row in snapped_sites.iterrows():
-            folium.CircleMarker(
-                location=[row["Latitude"], row["Longitude"]],
-                radius=3,
-                color="yellow",
-                fill=True,
-                fill_opacity=0.5,
-                tooltip=f"Original SCATS {row['SCATS']}"
-            ).add_to(m)
+            # Original SCATS site (yellow). Uncomment if you want to show original positions.
+            # folium.CircleMarker(
+            #     location=[row["Latitude"], row["Longitude"]],
+            #     radius=3,
+            #     color="yellow",
+            #     fill=True,
+            #     fill_opacity=0.5,
+            #     tooltip=f"Original SCATS {row['SCATS']}"
+            # ).add_to(m)
             
             # Snapped coordinates (blue)
             # Adjust snapped position display if needed (for visual alignment only)
@@ -257,14 +296,21 @@ def print_route_summary(route, G, snapped_sites, save_path="segment_times.png"):
     plt.savefig(save_path)
     print(f"[INFO] Segment-wise travel time chart saved to: {os.path.abspath(save_path)}")
     plt.show()
-
+    plt.close()
 
 if __name__ == "__main__":
+    # Define and ensure route output folder exists
+    ROUTE_OUTPUT_DIR = "output/routes"
+    os.makedirs(ROUTE_OUTPUT_DIR, exist_ok=True)
+
     csv_path = "output/Scats_Data_October_2006_parsed.csv"
-    predicted_csv = "output/predicted/gru_site_predictions.csv"  # Replace with desired model output
+    predicted_csv = "output/predicted/gru_site_predictions.csv"
 
     sites = load_scats_sites(csv_path)
     G = build_road_graph(sites)
+
+    # If very low values (< 100), graph might be missing large parts of the road network.
+    print(f"[DEBUG] Road graph summary: {G.number_of_nodes()} nodes, {G.number_of_edges()} edges")
     snapped_sites = snap_sites_to_graph(G, sites)
 
     predicted_volume_map = load_predicted_volumes(predicted_csv)
@@ -274,7 +320,14 @@ if __name__ == "__main__":
     }
 
     compute_travel_time_weights(G, scats_volume_by_node)
+
     route = example_routing(G, snapped_sites)
-    # if route:
-    #     print_route_summary(route, G, snapped_sites)
-    save_route_to_map(G, route, snapped_sites=snapped_sites, show_route=True) # False to hide route
+    if route:
+        output_chart_path = os.path.join(ROUTE_OUTPUT_DIR, "segment_times.png")
+        output_map_path = os.path.join(ROUTE_OUTPUT_DIR, "scats_route_map.html")
+
+        print_route_summary(route, G, snapped_sites, save_path=output_chart_path)
+        save_route_to_map(G, route, output_path=output_map_path, snapped_sites=snapped_sites, show_route=True) # False to hide route line
+
+
+
