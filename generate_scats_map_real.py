@@ -13,6 +13,7 @@ import networkx as nx
 from shapely.geometry import Point
 from geopandas import GeoDataFrame
 import folium
+import matplotlib.pyplot as plt
 
 
 def load_scats_sites(csv_path):
@@ -65,42 +66,65 @@ def compute_travel_time_weights(G, scats_volume_by_node):
 
     For each edge (u -> v):
     - Retrieves the distance (in metres) and converts to km
-    - Looks up the predicted hourly volume at node v
+    - Looks up the predicted traffic volume for the origin node u
     - Applies the provided quadratic formula to estimate speed:
           flow = -1.4648375 * speed^2 + 93.75 * speed
     - Rearranged to compute speed from flow using the quadratic formula
+    - Caps the calculated speed at 60 km/h if flow is < 351 veh/h (free-flow threshold)
     - Caps minimum speed at 5 km/h to avoid unrealistic low values
     - Computes travel time in seconds as:
-          travel_time = (distance_km / speed) * 3600
+        travel_time = (distance_km / speed) * 3600
       (no flat penalty is applied per edge)
 
     Integrates our trained ML-predicted SCATS volumes directly into the routing graph,
     giving better travel time estimates based on modelled traffic conditions.
     """
     for u, v, data in G.edges(data=True):
-        dist_m = data.get("length", 0)
-        dist_km = dist_m / 1000
-        volume = scats_volume_by_node.get(v, 0)
+        dist_m = data.get("length", 0)       # Get edge length in metres
+        dist_km = dist_m / 1000              # Convert to kilometres
 
+        # 1. Get predicted traffic volume from the origin SCATS node
+        volume_raw = scats_volume_by_node.get(u, 0)  # Previously used `v` — this is now fixed
+        volume = min(volume_raw, 1500)  # Clamp to stated max volume for road capacity
+
+        # Debug: Log when volume is clamped for transparency
+        if volume_raw != volume:
+            print(f"[INFO] Volume at node {u} clamped: raw={volume_raw:.1f} → capped={volume}")
+
+        # 2. Invert quadratic flow-speed equation
+        # flow = -1.4648375 * speed^2 + 93.75 * speed
         a, b = -1.4648375, 93.75
         discriminant = b**2 - 4 * a * (-volume)
+
         if discriminant < 0:
+            # If no real solution (should be incredibly rare?), fallback to capped free-flow speed
             speed = 60
         else:
             root1 = (b + discriminant**0.5) / (2 * a)
             root2 = (b - discriminant**0.5) / (2 * a)
-            speed = min(root1, root2) if volume > 351 else max(root1, root2)
 
-        speed = max(speed, 5)
-        travel_time = (dist_km / speed) * 3600
+            # Select root based on whether flow is under or over capacity threshold (351)
+            if volume <= 351:
+                speed = min(max(root1, root2), 60)  # Cap under-capacity speed at 60 km/h
+            else:
+                speed = min(root1, root2)  # Use congested (lower) root
+
+        # 3. Final safety check
+        speed = max(speed, 5)  # Prevent unrealistic low speed
+
+        # 4. Compute travel time (in seconds)
+        travel_time = (dist_km / speed) * 3600  # distance / speed = time [hr], convert to sec
+
+        # 5. Store weight on graph
         data["travel_time"] = travel_time
 
-    print("Assigned travel_time to all edges using SCATS volume estimates.")
+    print("Assigned travel_time to all edges using updated SCATS volume estimates.")
 
 
 def example_routing(G, snapped_sites):
     """Prompt user for route endpoints and return the best of top 5 shortest paths."""
     from networkx.algorithms.simple_paths import shortest_simple_paths
+    from itertools import islice
 
     print("Available SCATS sites:")
     print(snapped_sites[['SCATS', 'Location']].drop_duplicates().to_string(index=False))
@@ -116,22 +140,24 @@ def example_routing(G, snapped_sites):
         return []
 
     try:
-        # Find top 5 shortest simple paths
-        from itertools import islice
         k_paths = list(islice(shortest_simple_paths(G, start_node, end_node, weight='travel_time'), 5))
         travel_times = []
         for idx, path in enumerate(k_paths):
-            total = sum(G[u][v]['travel_time'] for u, v in zip(path[:-1], path[1:])) + len(path) * 30
-            travel_times.append((path, total))
-            print(f"Route {idx + 1}: {len(path)} nodes, estimated travel time = {total:.2f} sec ({total/60:.2f} min)")
+            total = sum(G[u][v]['travel_time'] for u, v in zip(path[:-1], path[1:]))
+            scats_nodes = snapped_sites[snapped_sites['nearest_node'].isin(path)]["SCATS"].nunique()
+            delay = scats_nodes * 30
+            travel_times.append((path, total + delay))
+            print(f"Route {idx + 1}: {len(path)} nodes, estimated time = {(total + delay) / 60:.2f} min")
 
         best_path, best_time = min(travel_times, key=lambda x: x[1])
-        total_time = sum(G[u][v]['travel_time'] for u, v in zip(best_path[:-1], best_path[1:])) + len(best_path) * 30
-        print(f"Selected best route (of top 5) from {start_id} to {end_id} with estimated travel time: {total_time:.2f} sec ({total_time/60:.2f} min)")
+        print(f"Selected best route from {start_id} to {end_id}: {best_time / 60:.2f} min")
+
+        print_route_summary(best_path, G, snapped_sites)
         return best_path
     except nx.NetworkXNoPath:
         print("No path found between selected SCATS sites.")
         return []
+
 
 def save_route_to_map(G, route, output_path="scats_route_map.html", snapped_sites=None, show_route=True):
     """Visualise the route and SCATS nodes on a map using Folium."""
@@ -163,13 +189,74 @@ def save_route_to_map(G, route, output_path="scats_route_map.html", snapped_site
                 color="blue",
                 fill=True,
                 fill_opacity=0.7,
-                tooltip=f"Snapped SCATS {row['SCATS']} - {row['Location']}"
+                tooltip=f"SCATS {row['SCATS']} - {row['Location']}"
             ).add_to(m)
 
     m.fit_bounds(m.get_bounds())
     m.save(output_path)
     print(f"Route map saved to: {output_path}")
     return m
+
+
+def print_route_summary(route, G, snapped_sites, save_path="segment_times.png"):
+    print("\n[DEBUG] Route Summary")
+    print(f"Route node count: {len(route)}")
+
+    # Identify unique SCATS sites in route based on nearest_node
+    scats_in_path_df = snapped_sites[snapped_sites['nearest_node'].isin(route)]
+    scats_in_path = scats_in_path_df["SCATS"].unique()
+    print(f"Unique SCATS nodes crossed: {len(scats_in_path)} → {[int(x) for x in scats_in_path]}")
+
+    # Build a reverse lookup: node ID -> SCATS ID
+    node_to_scats = dict(zip(snapped_sites['nearest_node'], snapped_sites['SCATS'].astype(str)))
+
+    # Sum travel time for route
+    segment_times = [(u, v, G[u][v]['travel_time']) for u, v in zip(route[:-1], route[1:])]
+    total_time = sum(t for _, _, t in segment_times)
+    delay = len(scats_in_path) * 30
+
+    print(f"Estimated travel time (without delays): {total_time / 60:.2f} min")
+    print(f"Estimated travel time (with 30s per SCATS): {(total_time + delay) / 60:.2f} min")
+
+    # Visual breakdown - horizontal bar chart (reverse to show source at top)
+    def label_for(u, v):
+        left = f"SCATS {node_to_scats[u]}" if u in node_to_scats else str(u)
+        right = f"SCATS {node_to_scats[v]}" if v in node_to_scats else str(v)
+        return f"{left} -> {right}"
+
+    labels = [label_for(u, v) for u, v, _ in segment_times][::-1]
+    durations = [t / 60 for _, _, t in segment_times][::-1]  # convert to minutes and reverse to match
+
+    max_height = 20  # Clamp maximum figure height to prevent overly tall images
+    fig_height = min(0.4 * len(labels) + 2, max_height)
+
+    # Assign colours: highlight bars where either u or v is a SCATS site
+    scats_nodes = set(snapped_sites['nearest_node'])
+    reversed_segments = list(zip(route[:-1], route[1:]))[::-1]
+    colors = ["#4CAF50" if u in scats_nodes or v in scats_nodes else "#2196F3" for u, v in reversed_segments]
+
+    plt.figure(figsize=(10, fig_height))
+    bars = plt.barh(range(len(durations)), durations, color=colors)
+    plt.yticks(range(len(labels)), labels, fontsize=7)
+    plt.xlabel("Travel Time (min)")
+    plt.title("Segment-wise Travel Time Along Route")
+    plt.tight_layout()
+
+    # Overlay travel time on each bar
+    for i, (bar, dur) in enumerate(zip(bars, durations)):
+        plt.text(bar.get_width() + 0.1, bar.get_y() + bar.get_height()/2, f"{dur:.1f} min",
+                 va='center', fontsize=6, color='black')
+
+    # Overlay SCATS site names clearly
+    if not scats_in_path_df.empty:
+        lines = [f"{int(row.SCATS)}: {row.Location}" for _, row in scats_in_path_df.drop_duplicates('SCATS').iterrows()]
+        full_label = "\n".join(lines)
+        plt.gcf().text(0.01, 0.02, f"SCATS Sites Used in Route:\n{full_label}", ha='left', fontsize=7)
+
+    # Save to file as well
+    plt.savefig(save_path)
+    print(f"[INFO] Segment-wise travel time chart saved to: {os.path.abspath(save_path)}")
+    plt.show()
 
 
 if __name__ == "__main__":
@@ -188,4 +275,6 @@ if __name__ == "__main__":
 
     compute_travel_time_weights(G, scats_volume_by_node)
     route = example_routing(G, snapped_sites)
+    # if route:
+    #     print_route_summary(route, G, snapped_sites)
     save_route_to_map(G, route, snapped_sites=snapped_sites, show_route=True) # False to hide route
