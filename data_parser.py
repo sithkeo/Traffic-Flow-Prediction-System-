@@ -172,7 +172,7 @@ def add_coordinates(df, listing_path, gps_path):
     return df
     
 
-def step_through_directory(directory_path="database", drop_zeros=False, listing_path=None, gps_path=None):
+def step_through_directory(directory_path="data", drop_zeros=False, listing_path=None, gps_path=None):
     """
     Prompts the user to step through files in a directory and select which ones to parse.
     Each selected file is parsed using parse_traffic_data().
@@ -247,11 +247,35 @@ if __name__ == "__main__":
             if os.path.isdir(path):
                 selected_dfs = step_through_directory(path, drop_zeros=drop, listing_path=listing_path, gps_path=gps_path)
                 for filename, df in selected_dfs:
-                    #print(df.head())
                     name, _ = os.path.splitext(filename)
                     base_name = name.replace(" ", "_")
                     preview_path = os.path.join("output", f"{base_name}_parsed.csv")
                     print(f"Saved to {preview_path}")
+            else:
+                try:
+                    # Parse the provided file directly (instead of stepping through a folder)
+                    df = parse_traffic_data(
+                        path,
+                        drop_zeros=drop,
+                        listing_path=listing_path,
+                        gps_path=gps_path,
+                        max_rows=max_rows
+                    )
+                    # Create a safe output filename based on the input file name (spaces replaced with underscores)
+                    name, _ = os.path.splitext(os.path.basename(path))
+                    base_name = name.replace(" ", "_")
+                    # Ensure the output folder exists
+                    os.makedirs("output", exist_ok=True)
+                    # Construct the full path to the output file
+                    output_path = os.path.join("output", f"{base_name}_parsed.csv")
+                    # Save the parsed DataFrame to CSV
+                    df.to_csv(output_path, index=False)
+                    print(f"Saved to {output_path}")
+
+                except Exception as e:
+                    # Catch any parsing or file errors and display them
+                    print(f"Failed to parse file: {e}")
+
 
         except ValueError as ve:
             print(f"Error: {ve}")
