@@ -48,7 +48,7 @@ def predict_site_volumes(df, model_path, output_csv):
     print(f"[INFO] Saved predicted site volumes to {output_csv}")
 
 if __name__ == "__main__":
-    print("Generate Predicted Site Volumes")
+    print("=== Generate Predicted Site Volumes ===")
     default_csv = "output/Scats_Data_October_2006_parsed.csv"
     model_options = {
         "gru": "output/trained/gru_model_trained.keras",
@@ -56,19 +56,65 @@ if __name__ == "__main__":
         "sae": "output/trained/sae_model_trained.keras"
     }
 
-    use_defaults = input("Use default file paths with GRU model? [Y/n]: ").strip().lower() != 'n'
+    print(f"\n[1] Use default CSV: {default_csv}")
+    print("    → Predict for ALL sites using ALL models")
+    print("[2] Predict for ALL sites using one selected model")
+    print("[3] Predict for a SPECIFIC site using one selected model")
+    print("[4] Custom CSV and model selection")
 
-    if use_defaults:
+    choice = input("\nSelect an option [1-4]: ").strip()
+
+    if choice == "1":
         csv_path = default_csv
-        model_key = "gru"
-        model_path = model_options[model_key]
-        output_csv = f"output/predicted/{model_key}_site_predictions.csv"
-    else:
-        csv_path = input("Enter path to SCATS CSV file: (output/Scats_Data_October_2006_parsed.csv)").strip()
+        df = load_data(csv_path)
+
+        for model_key, model_path in model_options.items():
+            output_csv = f"output/predicted/{model_key}_site_predictions.csv"
+            predict_site_volumes(df, model_path, output_csv)
+
+    elif choice == "2":
+        csv_path = default_csv
+        df = load_data(csv_path)
+
         print("Available models: gru, lstm, sae")
-        model_key = input("Select model to use (gru/lstm/sae): ").strip().lower()
+        model_key = input("Select model to use: ").strip().lower()
         model_path = model_options.get(model_key, model_options["gru"])
         output_csv = f"output/predicted/{model_key}_site_predictions.csv"
+        predict_site_volumes(df, model_path, output_csv)
 
-    df = load_data(csv_path)
-    predict_site_volumes(df, model_path, output_csv)
+    elif choice == "3":
+        csv_path = default_csv
+        df = load_data(csv_path)
+
+        print("Available models: gru, lstm, sae")
+        model_key = input("Select model to use: ").strip().lower()
+        model_path = model_options.get(model_key, model_options["gru"])
+        selected_site = input("Enter SCATS site ID to predict: ").strip()
+        df_site = df[df["SCATS"].astype(str) == selected_site]
+
+        if df_site.empty:
+            print(f"[ERROR] No data found for site {selected_site}")
+        else:
+            output_csv = f"output/predicted/{model_key}_site_{selected_site}_prediction.csv"
+            predict_site_volumes(df_site, model_path, output_csv)
+
+    elif choice == "4":
+        csv_path = input("Enter path to CSV: ").strip()
+        df = load_data(csv_path)
+
+        print("Available models: gru, lstm, sae")
+        model_key = input("Select model to use: ").strip().lower()
+        model_path = model_options.get(model_key, model_options["gru"])
+
+        site_scope = input("Predict for [A]ll sites or [S]pecific site? [A/S]: ").strip().lower()
+        if site_scope == "s":
+            selected_site = input("Enter SCATS site ID to predict: ").strip()
+            df = df[df["SCATS"].astype(str) == selected_site]
+            output_csv = f"output/predicted/{model_key}_site_{selected_site}_prediction.csv"
+        else:
+            output_csv = f"output/predicted/{model_key}_site_predictions.csv"
+
+        predict_site_volumes(df, model_path, output_csv)
+
+    else:
+        print("[ERROR] Invalid option. Please run again.")

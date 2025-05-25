@@ -34,7 +34,7 @@ def build_road_graph(sites, buffer_km=2):
 
     # Build convex hull around SCATS sites and buffer it
     points = [Point(xy) for xy in zip(sites["Longitude"], sites["Latitude"])]
-    polygon = gpd.GeoSeries(points).unary_union().convex_hull.buffer(buffer_km / 111)
+    polygon = gpd.GeoSeries(points).union_all().convex_hull.buffer(buffer_km / 111)
 
     # Filter OSM ways to include only valid driving roads
     custom_filter = (
@@ -151,9 +151,10 @@ def run_custom_route(G, snapped_sites, start_id, end_id, algo):
     return [int(n) for n in reconstruct_path(final_node)] if final_node else []
 
 
-def run_all_algorithms(G, snapped_sites, start_id, end_id):
+def run_all_algorithms(G, snapped_sites, start_id, end_id, algos=None):
     """Run all supported routing algorithms and return route and time for each."""
-    algos = ["astar", "bfs", "dfs", "gbfs", "dijkstra", "landmark_astar"]
+    if algos is None:
+        algos = ["astar", "bfs", "dfs", "gbfs", "dijkstra", "landmark_astar"]
     results = []
     for algo in algos:
         try:
@@ -170,7 +171,7 @@ def run_all_algorithms(G, snapped_sites, start_id, end_id):
 
 
 def print_route_summary(route, G, snapped_sites, save_path="segment_times.png"):
-    print("[DEBUG] Route Summary")
+    print("Route Summary:")
     print(f"Route node count: {len(route)}")
 
     # Identify unique SCATS sites in route based on nearest_node
