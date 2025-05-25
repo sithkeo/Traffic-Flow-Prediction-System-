@@ -13,9 +13,9 @@ listing_path = "data/SCATSSiteListingSpreadsheet_VicRoads.csv"
 gps_path = "data/Traffic_Count_Locations_with_LONG_LAT.csv"
 
 def preview():
-    files = sorted([f for f in os.listdir("database") if f.endswith(".csv") or f.endswith(".xlsx")])
+    files = sorted([f for f in os.listdir("data") if f.endswith(".csv") or f.endswith(".xlsx")])
     if not files:
-        print("No compatible files found in the database folder.")
+        print("No compatible files found in the data folder.")
         return
 
     print("Select a file to preview:")
@@ -28,7 +28,7 @@ def preview():
         return
 
     filename = files[int(choice)]
-    full_path = os.path.join("database", filename)
+    full_path = os.path.join("data", filename)
     try:
         df = parse_traffic_data(full_path, drop_zeros=False, listing_path=listing_path, gps_path=gps_path, max_rows=10)
         print(f"\nPreviewing: {filename}\n")
