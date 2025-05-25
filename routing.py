@@ -1,12 +1,7 @@
-# routing.py
-
-"""
-Generate road network graph using SCATS sensor locations and predicted volumes.
-Weights are computed based on predicted traffic, not historical averages.
-Retains original routing, snapping, and visualisation logic.
-"""
+# routing.py (formerly generate_scats_map_real.py)
 
 import os
+import sys
 import pandas as pd
 import osmnx as ox
 import networkx as nx
@@ -14,10 +9,12 @@ from shapely.geometry import Point
 from geopandas import GeoDataFrame
 import folium
 import matplotlib.pyplot as plt
+from search_algorithms import astar, bfs, dfs, gbfs, dijkstra, landmark_astar, reconstruct_path
 
-# Ensure output directories exist
+# Define and ensure route output folder exists
 ROUTE_OUTPUT_DIR = "output/routes"
 os.makedirs(ROUTE_OUTPUT_DIR, exist_ok=True)
+
 
 def load_scats_sites(csv_path):
     """Load SCATS site locations from CSV and exclude invalid coordinates."""
@@ -32,36 +29,18 @@ def load_scats_sites(csv_path):
     return sites
 
 
-def simplify_to_digraph_by_weight(G_multi, weight="travel_time"):
-    """Collapse a MultiDiGraph into a DiGraph, preserving the edge with the lowest weight."""
-    G_simple = nx.DiGraph()
-
-    for u, v, data in G_multi.edges(data=True):
-        w = data.get(weight, float("inf"))
-        if G_simple.has_edge(u, v):
-            if w < G_simple[u][v].get(weight, float("inf")):
-                G_simple[u][v] = data  # Replace with lower-weight edge
-        else:
-            G_simple.add_edge(u, v, **data)
-
-    return G_simple
-
-
 def build_road_graph(sites, buffer_km=2):
     import geopandas as gpd
 
     # Build convex hull around SCATS sites and buffer it
     points = [Point(xy) for xy in zip(sites["Longitude"], sites["Latitude"])]
-    polygon = gpd.GeoSeries(points).union_all().convex_hull.buffer(buffer_km / 111)
+    polygon = gpd.GeoSeries(points).unary_union().convex_hull.buffer(buffer_km / 111)
 
     # Filter OSM ways to include only valid driving roads
     custom_filter = (
         '["highway"~"motorway|trunk|primary|secondary|tertiary|residential|unclassified"]'
     )
     G_multi = ox.graph_from_polygon(polygon, custom_filter=custom_filter)
-
-    # DEBUG: Visualisation before pruning (optional)
-    # ox.plot_graph(G_multi, node_color='blue', edge_color='gray', node_size=5, figsize=(12, 12))
 
     # Convert MultiDiGraph to DiGraph (removes parallel edges)
     # OSMnx returns MultiDiGraph by default, which complicates routing and makes calculations slower.
@@ -80,9 +59,9 @@ def build_road_graph(sites, buffer_km=2):
 
 def snap_sites_to_graph(G, sites):
     """Snap SCATS sites to nearest OSM nodes using an offset for visual alignment."""
-        # Apply positional adjustment *before* snapping for better road alignment.
-        # Adjust here if SCATS coordinates appear consistently offset from road network.
-        # To test raw positions directly, set this to: Point(row["Longitude"], row["Latitude"])
+    # Apply positional adjustment *before* snapping for better road alignment.
+    # Adjust here if SCATS coordinates appear consistently offset from road network.
+    # To test raw positions directly, set this to: Point(row["Longitude"], row["Latitude"])
     gdf = GeoDataFrame(
         sites,
         geometry=sites.apply(lambda row: Point(row["Longitude"] + 0.0007, row["Latitude"] + 0.00108), axis=1),
@@ -118,127 +97,80 @@ def compute_travel_time_weights(G, scats_volume_by_node):
     giving better travel time estimates based on modelled traffic conditions.
     """
     for u, v, data in G.edges(data=True):
-        dist_m = data.get("length", 0)       # Get edge length in metres
-        dist_km = dist_m / 1000              # Convert to kilometres
-
-        # 1. Get predicted traffic volume from the origin SCATS node
-        volume_raw = scats_volume_by_node.get(u, 0)  # Previously used `v` — this is now fixed
-        volume = min(volume_raw, 1500)  # Clamp to stated max volume for road capacity
-
-        # Debug: Log when volume is clamped for transparency
+        dist_km = data.get("length", 0) / 1000
+        volume_raw = scats_volume_by_node.get(u, 0)
+        volume = min(volume_raw, 1500)
         if volume_raw != volume:
             print(f"[INFO] Volume at node {u} clamped: raw={volume_raw:.1f} → capped={volume}")
-
-        # 2. Invert quadratic flow-speed equation
-        # flow = -1.4648375 * speed^2 + 93.75 * speed
         a, b = -1.4648375, 93.75
-        discriminant = b**2 - 4 * a * (-volume)
-
-        if discriminant < 0:
-            # If no real solution (should be incredibly rare?), fallback to capped free-flow speed
+        d = b**2 - 4*a*(-volume)
+        if d < 0:
             speed = 60
         else:
-            root1 = (b + discriminant**0.5) / (2 * a)
-            root2 = (b - discriminant**0.5) / (2 * a)
-
-            # Select root based on whether flow is under or over capacity threshold (351)
-            if volume <= 351:
-                speed = min(max(root1, root2), 60)  # Cap under-capacity speed at 60 km/h
-            else:
-                speed = min(root1, root2)  # Use congested (lower) root
-
-        # 3. Final safety check
-        speed = max(speed, 5)  # Prevent unrealistic low speed
-
-        # 4. Compute travel time (in seconds)
-        travel_time = (dist_km / speed) * 3600  # distance / speed = time [hr], convert to sec
-
-        # 5. Store weight on graph
+            root1 = (b + d**0.5) / (2 * a)
+            root2 = (b - d**0.5) / (2 * a)
+            speed = min(root1, root2) if volume > 351 else min(max(root1, root2), 60)
+        speed = max(speed, 5)
+        travel_time = (dist_km / speed) * 3600
         data["travel_time"] = travel_time
-
     print("Assigned travel_time to all edges using updated SCATS volume estimates.")
 
-
-def example_routing(G, snapped_sites):
-    """Prompt user for route endpoints and return the best of top 5 shortest paths."""
-    from networkx.algorithms.simple_paths import shortest_simple_paths
-    from itertools import islice
-
-    print("Available SCATS sites:")
-    print(snapped_sites[['SCATS', 'Location']].drop_duplicates().to_string(index=False))
-
-    start_id = input("Enter the SCATS ID for the start point: ").strip()
-    end_id = input("Enter the SCATS ID for the end point: ").strip()
-
-    try:
-        start_node = snapped_sites.loc[snapped_sites['SCATS'].astype(str) == start_id, 'nearest_node'].values[0]
-        end_node = snapped_sites.loc[snapped_sites['SCATS'].astype(str) == end_id, 'nearest_node'].values[0]
-    except IndexError:
-        print("Invalid SCATS ID entered. Aborting routing.")
-        return []
-
-    try:
-        k_paths = list(islice(shortest_simple_paths(G, start_node, end_node, weight='travel_time'), 5))
-        travel_times = []
-        for idx, path in enumerate(k_paths):
-            total = sum(G[u][v]['travel_time'] for u, v in zip(path[:-1], path[1:]))
-            scats_nodes = snapped_sites[snapped_sites['nearest_node'].isin(path)]["SCATS"].nunique()
-            delay = scats_nodes * 30
-            travel_times.append((path, total + delay))
-            print(f"Route {idx + 1}: {len(path)} nodes, estimated time = {(total + delay) / 60:.2f} min")
-
-        best_path, best_time = min(travel_times, key=lambda x: x[1])
-        print(f"Selected best route from {start_id} to {end_id}: {best_time / 60:.2f} min")
-
-        print_route_summary(best_path, G, snapped_sites)
-        return best_path
-    except nx.NetworkXNoPath:
-        print("No path found between selected SCATS sites.")
-        return []
+def convert_nx_graph_to_search_inputs(G):
+    """Convert NetworkX graph to edge/coord format expected by search algorithms."""
+    edges = {}
+    coords = {}
+    for node in G.nodes:
+        coords[node] = (G.nodes[node]['x'], G.nodes[node]['y'])
+        edges[node] = {
+            nbr: min(data["travel_time"] for data in G[node][nbr].values())
+            if isinstance(G[node][nbr], dict) and isinstance(next(iter(G[node][nbr].values())), dict)
+            else G[node][nbr]["travel_time"] for nbr in G[node]
+        }
+    return edges, coords
 
 
-def save_route_to_map(G, route, output_path="scats_route_map.html", snapped_sites=None, show_route=True):
-    """Visualise the route and SCATS nodes on a map using Folium."""
-    m = folium.Map(tiles="OpenStreetMap", control_scale=True)
-    if show_route and route:
-        route_coords = [(G.nodes[n]['y'], G.nodes[n]['x']) for n in route]
-        folium.PolyLine(route_coords, color="red", weight=5, opacity=0.8).add_to(m)
-        folium.Marker(route_coords[0], tooltip="Start").add_to(m)
-        folium.Marker(route_coords[-1], tooltip="End").add_to(m)
+def run_custom_route(G, snapped_sites, start_id, end_id, algo):
+    """Run a single routing algorithm between start and end SCATS IDs."""
+    start = snapped_sites.loc[snapped_sites['SCATS'].astype(str) == start_id, 'nearest_node'].values[0]
+    end = snapped_sites.loc[snapped_sites['SCATS'].astype(str) == end_id, 'nearest_node'].values[0]
+    edges, coords = convert_nx_graph_to_search_inputs(G)
+    destinations = {end}
+    algo_map = {
+        "astar": (astar, True),
+        "gbfs": (gbfs, True),
+        "landmark_astar": (landmark_astar, True),
+        "bfs": (bfs, False),
+        "dfs": (dfs, False),
+        "dijkstra": (dijkstra, True)
+    }
+    algorithm_func, needs_coords = algo_map[algo]
+    if needs_coords:
+        final_node, _ = algorithm_func(start, destinations, edges, coords)
+    else:
+        final_node, _ = algorithm_func(start, destinations, edges)
+    return [int(n) for n in reconstruct_path(final_node)] if final_node else []
 
-    if snapped_sites is not None:
-        for _, row in snapped_sites.iterrows():
-            # Original SCATS site (yellow). Uncomment if you want to show original positions.
-            # folium.CircleMarker(
-            #     location=[row["Latitude"], row["Longitude"]],
-            #     radius=3,
-            #     color="yellow",
-            #     fill=True,
-            #     fill_opacity=0.5,
-            #     tooltip=f"Original SCATS {row['SCATS']}"
-            # ).add_to(m)
-            
-            # Snapped coordinates (blue)
-            # Adjust snapped position display if needed (for visual alignment only)
-            # To apply a visual offset post-snapping, modify the following line:
-            # location=(G.nodes[row["nearest_node"]]['y'] + offset_lat, G.nodes[row["nearest_node"]]['x'] + offset_lon)
-            folium.CircleMarker(
-                location=(G.nodes[row["nearest_node"]]['y'], G.nodes[row["nearest_node"]]['x']),
-                radius=4,
-                color="blue",
-                fill=True,
-                fill_opacity=0.7,
-                tooltip=f"SCATS {row['SCATS']} - {row['Location']}"
-            ).add_to(m)
 
-    m.fit_bounds(m.get_bounds())
-    m.save(output_path)
-    print(f"Route map saved to: {output_path}")
-    return m
+def run_all_algorithms(G, snapped_sites, start_id, end_id):
+    """Run all supported routing algorithms and return route and time for each."""
+    algos = ["astar", "bfs", "dfs", "gbfs", "dijkstra", "landmark_astar"]
+    results = []
+    for algo in algos:
+        try:
+            route = run_custom_route(G, snapped_sites, start_id, end_id, algo)
+            if not route:
+                print(f"[WARN] {algo} failed to find a route.")
+                continue
+            scats_crossed = snapped_sites[snapped_sites['nearest_node'].isin(route)]['SCATS'].nunique()
+            total_time = sum(G[u][v]['travel_time'] for u, v in zip(route[:-1], route[1:])) + scats_crossed * 30
+            results.append({"algo": algo, "route": route, "time_min": total_time / 60})
+        except Exception as e:
+            print(f"[ERROR] {algo} failed: {e}")
+    return sorted(results, key=lambda r: r["time_min"])
 
 
 def print_route_summary(route, G, snapped_sites, save_path="segment_times.png"):
-    print("\n[DEBUG] Route Summary")
+    print("[DEBUG] Route Summary")
     print(f"Route node count: {len(route)}")
 
     # Identify unique SCATS sites in route based on nearest_node
@@ -278,7 +210,7 @@ def print_route_summary(route, G, snapped_sites, save_path="segment_times.png"):
     bars = plt.barh(range(len(durations)), durations, color=colors)
     plt.yticks(range(len(labels)), labels, fontsize=7)
     plt.xlabel("Travel Time (min)")
-    plt.title("Segment-wise Travel Time Along Route")
+    plt.title(f"{os.path.splitext(os.path.basename(save_path))[0].replace('segment_times_', '').upper()} Route Segment Times")
     plt.tight_layout()
 
     # Overlay travel time on each bar
@@ -289,45 +221,105 @@ def print_route_summary(route, G, snapped_sites, save_path="segment_times.png"):
     # Overlay SCATS site names clearly
     if not scats_in_path_df.empty:
         lines = [f"{int(row.SCATS)}: {row.Location}" for _, row in scats_in_path_df.drop_duplicates('SCATS').iterrows()]
-        full_label = "\n".join(lines)
-        plt.gcf().text(0.01, 0.02, f"SCATS Sites Used in Route:\n{full_label}", ha='left', fontsize=7)
+        full_label = "".join(lines)
+        plt.gcf().text(0.01, 0.02, f"SCATS Sites Used in Route:{full_label}", ha='left', fontsize=7)
 
     # Save to file as well
-    plt.savefig(save_path)
+    plt.savefig(os.path.join(ROUTE_OUTPUT_DIR, os.path.basename(save_path)))
     print(f"[INFO] Segment-wise travel time chart saved to: {os.path.abspath(save_path)}")
-    plt.show()
+    
     plt.close()
 
+
+def save_multi_route_map(G, results, snapped_sites, start_id, end_id):
+    """Visualise all algorithm routes on a single Folium map with distinct colours."""
+    m = folium.Map(location=[-37.81, 144.96], zoom_start=13, tiles="OpenStreetMap", control_scale=True)
+    colours = ["red", "blue", "green", "orange", "purple", "black"]
+    for i, result in enumerate(results):
+        coords = [(G.nodes[n]['y'], G.nodes[n]['x']) for n in result['route']]
+        folium.PolyLine(coords, color=colours[i % len(colours)], weight=5 if i > 0 else 8, opacity=0.8,
+                        tooltip=f"{result['algo'].upper()} ({result['time_min']:.2f} min)").add_to(m)
+    folium.Marker(coords[0], tooltip="Start").add_to(m)
+    folium.Marker(coords[-1], tooltip="End").add_to(m)
+    output_path = os.path.join(ROUTE_OUTPUT_DIR, f"multi_route_map_{start_id}_to_{end_id}.html")
+    m.fit_bounds(m.get_bounds())
+    m.save(output_path)
+    print(f"[INFO] Multi-route map saved: {output_path}")
+
+
+def run_example_routing(G, snapped_sites):
+    from networkx.algorithms.simple_paths import shortest_simple_paths
+    from itertools import islice
+
+    print("Available SCATS sites:")
+    print(snapped_sites[['SCATS', 'Location']].drop_duplicates().to_string(index=False))
+
+    start_id = input("Enter the SCATS ID for the start point: ").strip()
+    end_id = input("Enter the SCATS ID for the end point: ").strip()
+
+    try:
+        start_node = snapped_sites.loc[snapped_sites['SCATS'].astype(str) == start_id, 'nearest_node'].values[0]
+        end_node = snapped_sites.loc[snapped_sites['SCATS'].astype(str) == end_id, 'nearest_node'].values[0]
+    except IndexError:
+        print("Invalid SCATS ID entered. Aborting routing.")
+        sys.exit(1)
+
+    try:
+        k_paths = list(islice(shortest_simple_paths(G, start_node, end_node, weight='travel_time'), 5))
+        travel_times = []
+        for idx, path in enumerate(k_paths):
+            total = sum(G[u][v]['travel_time'] for u, v in zip(path[:-1], path[1:]))
+            scats_nodes = snapped_sites[snapped_sites['nearest_node'].isin(path)]["SCATS"].nunique()
+            delay = scats_nodes * 30
+            travel_times.append((path, total + delay))
+            print(f"Route {idx + 1}: {len(path)} nodes, estimated time = {(total + delay) / 60:.2f} min")
+
+        best_path, best_time = min(travel_times, key=lambda x: x[1])
+        print(f"Selected best route from {start_id} to {end_id}: {best_time / 60:.2f} min")
+
+        output_chart_path = os.path.join(ROUTE_OUTPUT_DIR, f"segment_times_example_{start_id}_to_{end_id}.png")
+        print_route_summary(best_path, G, snapped_sites, save_path=output_chart_path)
+
+        route_coords = [(G.nodes[n]['y'], G.nodes[n]['x']) for n in best_path]
+        m = folium.Map(tiles="OpenStreetMap", control_scale=True)
+        folium.PolyLine(route_coords, color="red", weight=5, opacity=0.8).add_to(m)
+        folium.Marker(route_coords[0], tooltip="Start").add_to(m)
+        folium.Marker(route_coords[-1], tooltip="End").add_to(m)
+        m.fit_bounds(m.get_bounds())
+        map_path = os.path.join(ROUTE_OUTPUT_DIR, f"example_route_map_{start_id}_to_{end_id}.html")
+        m.save(map_path)
+        print(f"[INFO] Example route map saved: {map_path}")
+
+    except nx.NetworkXNoPath:
+        print("No path found between selected SCATS sites.")
+
+
 if __name__ == "__main__":
-    # Define and ensure route output folder exists
-    ROUTE_OUTPUT_DIR = "output/routes"
-    os.makedirs(ROUTE_OUTPUT_DIR, exist_ok=True)
+    # CLI entry point for routing pipeline. Supports default mode and fallback to example routing.
+    mode = sys.argv[1] if len(sys.argv) > 1 else "default"
+    start_id = sys.argv[2] if len(sys.argv) > 2 else "970"
+    end_id = sys.argv[3] if len(sys.argv) > 3 else "4821"
 
     csv_path = "output/Scats_Data_October_2006_parsed.csv"
     predicted_csv = "output/predicted/gru_site_predictions.csv"
 
     sites = load_scats_sites(csv_path)
     G = build_road_graph(sites)
-
-    # If very low values (< 100), graph might be missing large parts of the road network.
-    print(f"[DEBUG] Road graph summary: {G.number_of_nodes()} nodes, {G.number_of_edges()} edges")
     snapped_sites = snap_sites_to_graph(G, sites)
-
     predicted_volume_map = load_predicted_volumes(predicted_csv)
     scats_volume_by_node = {
         row["nearest_node"]: predicted_volume_map.get(row["SCATS"], 0)
         for _, row in snapped_sites.iterrows()
     }
-
     compute_travel_time_weights(G, scats_volume_by_node)
 
-    route = example_routing(G, snapped_sites)
-    if route:
-        output_chart_path = os.path.join(ROUTE_OUTPUT_DIR, "segment_times.png")
-        output_map_path = os.path.join(ROUTE_OUTPUT_DIR, "scats_route_map.html")
+    if mode == "example":
+        run_example_routing(G, snapped_sites)
+    else:
+        results = run_all_algorithms(G, snapped_sites, start_id, end_id)
+        for r in results:
+            print(f"{r['algo'].upper()}: {r['time_min']:.2f} min")
+            output_chart_path = os.path.join(ROUTE_OUTPUT_DIR, f"segment_times_{r['algo']}_{start_id}_to_{end_id}.png")
+            print_route_summary(r['route'], G, snapped_sites, save_path=output_chart_path)
 
-        print_route_summary(route, G, snapped_sites, save_path=output_chart_path)
-        save_route_to_map(G, route, output_path=output_map_path, snapped_sites=snapped_sites, show_route=True) # False to hide route line
-
-
-
+        save_multi_route_map(G, results, snapped_sites, start_id, end_id)
